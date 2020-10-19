@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6"/>
+	<Project>
+		<Option title="WGOT"/>
+		<Option makefile_is_custom="1"/>
+		<Option compiler="clang"/>
+		<Option virtualFolders="CMake Files\;CMake Files\..\;CMake Files\..\..\;CMake Files\..\..\..\;CMake Files\..\..\..\.local\;CMake Files\..\..\..\.local\bin\;CMake Files\..\..\..\.local\bin\dealii-9.2.0\;CMake Files\..\..\..\.local\bin\dealii-9.2.0\lib\;CMake Files\..\..\..\.local\bin\dealii-9.2.0\lib\cmake\;CMake Files\..\..\..\.local\bin\dealii-9.2.0\lib\cmake\deal.II\;CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\;CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\deal.II\;CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\deal.II\macros\;"/>
+		<Build>
+			<Target title="all">
+				<Option working_dir="/Users/colinjensen/Documents/GitHub/WGOT"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 all"/>
+					<CompileFile command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="rebuild_cache">
+				<Option working_dir="/Users/colinjensen/Documents/GitHub/WGOT"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 rebuild_cache"/>
+					<CompileFile command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="edit_cache">
+				<Option working_dir="/Users/colinjensen/Documents/GitHub/WGOT"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 edit_cache"/>
+					<CompileFile command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="WGOT">
+				<Option output="/Users/colinjensen/Documents/GitHub/WGOT/WGOT" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/Users/colinjensen/Documents/GitHub/WGOT"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="clang"/>
+				<Compiler>
+					<Add option="-DDEBUG"/>
+					<Add option="-DTBB_USE_DEBUG"/>
+					<Add option="-DTBB_DO_ASSERT=1"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/tbb-2018_U2/include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/boost-1.70.0/include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/umfpack/UMFPACK/Include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/umfpack/AMD/Include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/muparser_v2_2_4/include"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 WGOT"/>
+					<CompileFile command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="WGOT/fast">
+				<Option output="/Users/colinjensen/Documents/GitHub/WGOT/WGOT" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/Users/colinjensen/Documents/GitHub/WGOT"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="clang"/>
+				<Compiler>
+					<Add option="-DDEBUG"/>
+					<Add option="-DTBB_USE_DEBUG"/>
+					<Add option="-DTBB_DO_ASSERT=1"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/tbb-2018_U2/include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/boost-1.70.0/include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/umfpack/UMFPACK/Include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/umfpack/AMD/Include"/>
+					<Add directory="/Users/colinjensen/.local/bin/dealii-9.2.0/bundled/muparser_v2_2_4/include"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 WGOT/fast"/>
+					<CompileFile command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/Users/colinjensen/Documents/GitHub/WGOT/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+		</Build>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/driver.cpp">
+			<Option target="WGOT"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/CMakeLists.txt">
+			<Option virtualFolder="CMake Files\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/lib/cmake/deal.II/deal.IIConfig.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\lib\cmake\deal.II\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/lib/cmake/deal.II/deal.IIConfigVersion.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\lib\cmake\deal.II\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/lib/cmake/deal.II/deal.IITargets.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\lib\cmake\deal.II\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/share/deal.II/macros/macro_deal_ii_add_test.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\deal.II\macros\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/share/deal.II/macros/macro_deal_ii_initialize_cached_variables.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\deal.II\macros\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/share/deal.II/macros/macro_deal_ii_invoke_autopilot.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\deal.II\macros\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/share/deal.II/macros/macro_deal_ii_pickup_tests.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\deal.II\macros\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/share/deal.II/macros/macro_deal_ii_query_git_information.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\deal.II\macros\"/>
+		</Unit>
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/../../../.local/bin/dealii-9.2.0/share/deal.II/macros/macro_deal_ii_setup_target.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\.local\bin\dealii-9.2.0\share\deal.II\macros\"/>
+		</Unit>
+	</Project>
+</CodeBlocks_project_file>
