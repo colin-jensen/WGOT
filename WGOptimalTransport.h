@@ -286,7 +286,7 @@ void WGOptimalTransport<dim>::setup_system()
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
 
-    // Handle constraints
+    // Handle uniqueness problem that results from Neumann boundary conditions
     const FEValuesExtractors::Scalar interface_pressure(1);
     const ComponentMask              interface_pressure_mask =
         fe.component_mask(interface_pressure);
@@ -663,7 +663,8 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                 // Add the interior part of the discrete weak 2nd-order partial derivative.
                 for (unsigned int i = 0; i < dim; ++i)
                     for (unsigned int j = 0; j < dim; ++j)
-                        for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
+                        for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
+                        {
                             cell_pd_matrix(i, j) += solution_interior *
                                                     fe_values_pd.shape_hessian(k, q)[j][i] *
                                                     fe_values_pd.JxW(q);
@@ -672,22 +673,25 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
 
             for (const auto &face : cell->face_iterators())
             {
-                fe_values.reinit(cell, face);
-                fe_values_pd.reinit(cell_pd, face);
+                fe_face_values.reinit(cell, face);
 
                 for (unsigned int q = 0; q < n_face_q_points; ++q)
                 {
+                    const Tensor<1, dim> normal = fe_face_values.normal_vector(q);
+
                     // Compute the value of the solution on the interior
                     for (unsigned int k = 0; k < dofs_per_cell; ++k) {
-                        solution_face += cell_solution(k) * fe_values[pressure_face].value(k, q);
+                        solution_face += cell_solution(k) * fe_face_values[pressure_face].value(k, q);
                     }
 
                     // Add the interior part of the discrete weak 2nd-order partial derivative.
                     for (unsigned int i = 0; i < dim; ++i)
                         for (unsigned int j = 0; j < dim; ++j)
-                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
-                                cell_pd_matrix(i, j) += solution_interior *
-                                                        fe_values_pd.shape_hessian(k, q)[j][i] *
+                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
+                            {
+                                cell_pd_matrix(i, j) -= solution_face *
+                                                        normal[i] *
+                                                        fe_values_pd.shape_grad(k, q)[j] *
                                                         fe_values_pd.JxW(q);
                             }
                 }
