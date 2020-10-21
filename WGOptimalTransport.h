@@ -64,7 +64,8 @@ public:
 private:
     void make_grid();
     void setup_system();
-    void assemble_system();
+    void assemble_system_matrix();
+    void assemble_system_rhs();
     void solve();
     void compute_postprocessed_velocity();
     void compute_velocity_errors();
@@ -376,7 +377,7 @@ void WGOptimalTransport<dim>::setup_system()
 // Given this introduction, the following declarations should be
 // pretty obvious:
 template <int dim>
-void WGOptimalTransport<dim>::assemble_system()
+void WGOptimalTransport<dim>::assemble_system_matrix()
 {
     const QGauss<dim>     quadrature_formula(fe_dgrt.degree + 1);
     const QGauss<dim - 1> face_quadrature_formula(fe_dgrt.degree + 1);
@@ -567,20 +568,104 @@ void WGOptimalTransport<dim>::assemble_system()
         }
 
         // Next, we calculate the right hand side, $\int_{K} f q \mathrm{d}x$:
-        cell_rhs = 0;
-        for (unsigned int q = 0; q < n_q_points; ++q)
-            for (unsigned int i = 0; i < dofs_per_cell; ++i)
-            {
-                cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
-                                right_hand_side_values[q] * fe_values.JxW(q));
-            }
+//        cell_rhs = 0;
+//        for (unsigned int q = 0; q < n_q_points; ++q)
+//            for (unsigned int i = 0; i < dofs_per_cell; ++i)
+//            {
+//                cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
+//                                right_hand_side_values[q] * fe_values.JxW(q));
+//            }
 
         // The last step is to distribute components of the local
         // matrix into the system matrix and transfer components of
         // the cell right hand side into the system right hand side:
         cell->get_dof_indices(local_dof_indices);
         constraints.distribute_local_to_global(
-                local_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
+                local_matrix, local_dof_indices, system_matrix);
+    }
+}
+
+template<int dim>
+void WGOptimalTransport<dim>::assemble_system_rhs()
+{
+    const QGauss<dim>     quadrature_formula(fe_dgrt.degree + 1);
+    const QGauss<dim - 1> face_quadrature_formula(fe_dgrt.degree + 1);
+
+    FEValues<dim>     fe_values(fe,
+                                quadrature_formula,
+                                update_values | update_quadrature_points |
+                                update_JxW_values);
+    FEFaceValues<dim> fe_face_values(fe,
+                                     face_quadrature_formula,
+                                     update_values | update_normal_vectors |
+                                     update_quadrature_points |
+                                     update_JxW_values);
+
+    FEValues<dim>     fe_values_dgrt(fe_dgrt,
+                                     quadrature_formula,
+                                     update_values | update_gradients |
+                                     update_quadrature_points |
+                                     update_JxW_values);
+    FEFaceValues<dim> fe_face_values_dgrt(fe_dgrt,
+                                          face_quadrature_formula,
+                                          update_values |
+                                          update_normal_vectors |
+                                          update_quadrature_points |
+                                          update_JxW_values);
+
+    const unsigned int dofs_per_cell      = fe.dofs_per_cell;
+    const unsigned int dofs_per_cell_dgrt = fe_dgrt.dofs_per_cell;
+
+    const unsigned int n_q_points      = fe_values.get_quadrature().size();
+    const unsigned int n_q_points_dgrt = fe_values_dgrt.get_quadrature().size();
+
+    const unsigned int n_face_q_points = fe_face_values.get_quadrature().size();
+
+    RightHandSide<dim>  right_hand_side;
+    std::vector<double> right_hand_side_values(n_q_points);
+
+    const Coefficient<dim>      coefficient;
+    std::vector<Tensor<2, dim>> coefficient_values(n_q_points);
+
+    std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+
+
+    // Next, let us declare the various cell matrices discussed in the
+    // introduction:
+    FullMatrix<double> cell_matrix_M(dofs_per_cell_dgrt, dofs_per_cell_dgrt);
+    FullMatrix<double> cell_matrix_G(dofs_per_cell_dgrt, dofs_per_cell);
+    FullMatrix<double> cell_matrix_C(dofs_per_cell, dofs_per_cell_dgrt);
+    FullMatrix<double> local_matrix(dofs_per_cell, dofs_per_cell);
+    Vector<double>     cell_rhs(dofs_per_cell);
+    Vector<double>     cell_solution(dofs_per_cell);
+
+    // We need <code>FEValuesExtractors</code> to access the @p interior and
+    // @p face component of the shape functions.
+    const FEValuesExtractors::Vector velocities(0);
+    const FEValuesExtractors::Scalar pressure_interior(0);
+    const FEValuesExtractors::Scalar pressure_face(1);
+
+    for (const auto cell : dof_handler.active_cell_iterators())
+    {
+        fe_values.reinit(cell);
+
+        const typename Triangulation<dim>::active_cell_iterator cell_dgrt =
+                cell;
+        fe_values_dgrt.reinit(cell_dgrt);
+
+        right_hand_side.value_list(fe_values.get_quadrature_points(),
+                                   right_hand_side_values);
+
+        cell_rhs = 0;
+        for (unsigned int q = 0; q < n_q_points; ++q)
+            for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+                cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
+                                right_hand_side_values[q] * fe_values.JxW(q));
+            }
+
+        cell->get_dof_indices(local_dof_indices);
+        constraints.distribute_local_to_global(
+                cell_rhs, local_dof_indices, system_rhs);
     }
 }
 
@@ -1034,7 +1119,8 @@ void WGOptimalTransport<dim>::run()
 {
     make_grid();
     setup_system();
-    assemble_system();
+    assemble_system_matrix();
+    assemble_system_rhs();
     solve();
     //compute_postprocessed_velocity();
     compute_pressure_error();
