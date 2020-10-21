@@ -252,7 +252,7 @@ template <int dim>
 void WGOptimalTransport<dim>::make_grid()
 {
     GridGenerator::hyper_cube(triangulation, 0, 1);
-    triangulation.refine_global(5);
+    triangulation.refine_global(1);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -588,8 +588,12 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
 template<int dim>
 void WGOptimalTransport<dim>::assemble_system_rhs()
 {
-    const QGauss<dim>     quadrature_formula(fe_dgrt.degree + 1);
-    const QGauss<dim - 1> face_quadrature_formula(fe_dgrt.degree + 1);
+    FE_DGQ<dim> fe_pd(0);
+    DoFHandler<dim> dof_handler_pd(triangulation);
+    dof_handler_pd.distribute_dofs(fe_pd);
+
+    const QGauss<dim>     quadrature_formula(fe.degree + 1);
+    const QGauss<dim - 1> face_quadrature_formula(fe.degree + 1);
 
     FEValues<dim>     fe_values(fe,
                                 quadrature_formula,
@@ -601,41 +605,29 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                                      update_quadrature_points |
                                      update_JxW_values);
 
-    FEValues<dim>     fe_values_dgrt(fe_dgrt,
+    FEValues<dim>     fe_values_pd(fe_pd,
                                      quadrature_formula,
                                      update_values | update_gradients |
                                      update_quadrature_points |
                                      update_JxW_values);
-    FEFaceValues<dim> fe_face_values_dgrt(fe_dgrt,
-                                          face_quadrature_formula,
-                                          update_values |
-                                          update_normal_vectors |
-                                          update_quadrature_points |
-                                          update_JxW_values);
+
 
     const unsigned int dofs_per_cell      = fe.dofs_per_cell;
-    const unsigned int dofs_per_cell_dgrt = fe_dgrt.dofs_per_cell;
+    const unsigned int dofs_per_cell_pd = fe_pd.dofs_per_cell;
 
     const unsigned int n_q_points      = fe_values.get_quadrature().size();
-    const unsigned int n_q_points_dgrt = fe_values_dgrt.get_quadrature().size();
+    const unsigned int n_q_points_pd   = fe_values_pd.get_quadrature().size();
 
     const unsigned int n_face_q_points = fe_face_values.get_quadrature().size();
 
     RightHandSide<dim>  right_hand_side;
     std::vector<double> right_hand_side_values(n_q_points);
 
-    const Coefficient<dim>      coefficient;
-    std::vector<Tensor<2, dim>> coefficient_values(n_q_points);
-
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
+    FullMatrix<double> cell_pd_matrix(dim, dim);
+    cell_pd_matrix = 0;
 
-    // Next, let us declare the various cell matrices discussed in the
-    // introduction:
-    FullMatrix<double> cell_matrix_M(dofs_per_cell_dgrt, dofs_per_cell_dgrt);
-    FullMatrix<double> cell_matrix_G(dofs_per_cell_dgrt, dofs_per_cell);
-    FullMatrix<double> cell_matrix_C(dofs_per_cell, dofs_per_cell_dgrt);
-    FullMatrix<double> local_matrix(dofs_per_cell, dofs_per_cell);
     Vector<double>     cell_rhs(dofs_per_cell);
     Vector<double>     cell_solution(dofs_per_cell);
 
@@ -645,13 +637,42 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
     const FEValuesExtractors::Scalar pressure_interior(0);
     const FEValuesExtractors::Scalar pressure_face(1);
 
-    for (const auto cell : dof_handler.active_cell_iterators())
+    typename DoFHandler<dim>::active_cell_iterator
+            cell = dof_handler.begin_active(),
+            endc = dof_handler.end(), cell_pd = dof_handler_pd.begin_active();
+    for (; cell != endc; ++cell, ++cell_pd)
     {
         fe_values.reinit(cell);
+        fe_values_pd.reinit(cell_pd);
 
-        const typename Triangulation<dim>::active_cell_iterator cell_dgrt =
-                cell;
-        fe_values_dgrt.reinit(cell_dgrt);
+        if (!solution.all_zero())
+        {
+            // Grab the relevant values from solution vector
+            cell->get_dof_values(solution, cell_solution);
+
+            double solution_interior = 0;
+
+            for (unsigned int q = 0; q < n_q_points; ++q) {
+
+                // Compute the value of the solution on the interior
+                for (unsigned int k = 0; k < dofs_per_cell; ++k) {
+                    solution_interior += cell_solution(k) * fe_values[pressure_interior].value(k, q);
+                }
+
+                // Add the interior part of the discrete weak 2nd-order partial derivative.
+                for (unsigned int i = 0; i < dim; ++i)
+                    for (unsigned int j = 0; j < dim; ++j)
+                        for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
+                            cell_pd_matrix(i, j) += solution_interior *
+                                                    fe_values_pd.shape_value(k, q) *
+                                                    fe_values_pd.JxW(q);
+                        }
+            }
+        }
+
+
+
+
 
         right_hand_side.value_list(fe_values.get_quadrature_points(),
                                    right_hand_side_values);
@@ -1122,8 +1143,9 @@ void WGOptimalTransport<dim>::run()
     assemble_system_matrix();
     assemble_system_rhs();
     solve();
+    assemble_system_rhs();
     //compute_postprocessed_velocity();
-    compute_pressure_error();
+    //compute_pressure_error();
     //compute_velocity_errors();
-    output_results();
+    //output_results();
 }
