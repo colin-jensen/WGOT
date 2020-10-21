@@ -4,8 +4,6 @@
 
 #include "WGOptimalTransport.h"
 
-#include <iostream>
-
 int main()
 {
     try
