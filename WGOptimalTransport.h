@@ -608,7 +608,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
     FEValues<dim>     fe_values_pd(fe_pd,
                                      quadrature_formula,
                                      update_values | update_gradients |
-                                     update_quadrature_points |
+                                     update_quadrature_points | update_hessians |
                                      update_JxW_values);
 
 
@@ -651,6 +651,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
             cell->get_dof_values(solution, cell_solution);
 
             double solution_interior = 0;
+            double solution_face = 0;
 
             for (unsigned int q = 0; q < n_q_points; ++q) {
 
@@ -664,9 +665,32 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                     for (unsigned int j = 0; j < dim; ++j)
                         for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
                             cell_pd_matrix(i, j) += solution_interior *
-                                                    fe_values_pd.shape_value(k, q) *
+                                                    fe_values_pd.shape_hessian(k, q)[j][i] *
                                                     fe_values_pd.JxW(q);
                         }
+            }
+
+            for (const auto &face : cell->face_iterators())
+            {
+                fe_values.reinit(cell, face);
+                fe_values_pd.reinit(cell_pd, face);
+
+                for (unsigned int q = 0; q < n_face_q_points; ++q)
+                {
+                    // Compute the value of the solution on the interior
+                    for (unsigned int k = 0; k < dofs_per_cell; ++k) {
+                        solution_face += cell_solution(k) * fe_values[pressure_face].value(k, q);
+                    }
+
+                    // Add the interior part of the discrete weak 2nd-order partial derivative.
+                    for (unsigned int i = 0; i < dim; ++i)
+                        for (unsigned int j = 0; j < dim; ++j)
+                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
+                                cell_pd_matrix(i, j) += solution_interior *
+                                                        fe_values_pd.shape_hessian(k, q)[j][i] *
+                                                        fe_values_pd.JxW(q);
+                            }
+                }
             }
         }
 
