@@ -139,10 +139,10 @@ public:
 
 
 template <int dim>
-double BoundaryValues<dim>::value(const Point<dim> & /*p*/,
+double BoundaryValues<dim>::value(const Point<dim> & p,
                                   const unsigned int /*component*/) const
 {
-    return 0;
+    return std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
 }
 
 
@@ -161,8 +161,8 @@ template <int dim>
 double RightHandSide<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
-    return (2 * numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
-            std::sin(numbers::PI * p[1]));
+    return (2 * numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
+            std::cos(numbers::PI * p[1]));
 }
 
 
@@ -196,7 +196,7 @@ template <int dim>
 double ExactPressure<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
-    return std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
+    return std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
 }
 
 
@@ -285,19 +285,38 @@ void WGOptimalTransport<dim>::setup_system()
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
 
+    // Handle constraints
+    const FEValuesExtractors::Scalar interface_pressure(1);
+    const ComponentMask              interface_pressure_mask =
+        fe.component_mask(interface_pressure);
+    std::vector<bool> boundary_dofs(dof_handler.n_dofs(), false);
+    DoFTools::extract_boundary_dofs(dof_handler,
+                                    interface_pressure_mask,
+                                    boundary_dofs);
+    const unsigned int first_boundary_dof = std::distance(
+            boundary_dofs.begin(),
+            std::find(boundary_dofs.begin(), boundary_dofs.end(), true));
+    constraints.clear();
+    constraints.add_line(first_boundary_dof);
+    for (unsigned int i = first_boundary_dof + 1; i < dof_handler.n_dofs(); ++i)
+        if (boundary_dofs[i] == true)
+            constraints.add_entry(first_boundary_dof, i, -1);
+    constraints.close();
 
-    {
-        constraints.clear();
-        const FEValuesExtractors::Scalar interface_pressure(1);
-        const ComponentMask              interface_pressure_mask =
-                fe.component_mask(interface_pressure);
-        VectorTools::interpolate_boundary_values(dof_handler,
-                                                 0,
-                                                 BoundaryValues<dim>(),
-                                                 constraints,
-                                                 interface_pressure_mask);
-        constraints.close();
-    }
+
+
+//    {
+//        constraints.clear();
+//        const FEValuesExtractors::Scalar interface_pressure(1);
+//        const ComponentMask              interface_pressure_mask =
+//                fe.component_mask(interface_pressure);
+//        VectorTools::interpolate_boundary_values(dof_handler,
+//                                                 0,
+//                                                 BoundaryValues<dim>(),
+//                                                 constraints,
+//                                                 interface_pressure_mask);
+//        constraints.close();
+//    }
 
 
     // In the bilinear form, there is no integration term over faces
@@ -980,15 +999,15 @@ void WGOptimalTransport<dim>::output_results() const
 
         // Then do the same with the Darcy velocity field, and continue
         // with writing everything out into a file.
-        const std::vector<std::string> velocity_names(dim, "velocity");
-        const std::vector<
-                DataComponentInterpretation::DataComponentInterpretation>
-                velocity_component_interpretation(
-                dim, DataComponentInterpretation::component_is_part_of_vector);
-        data_out.add_data_vector(dof_handler_dgrt,
-                                 darcy_velocity,
-                                 velocity_names,
-                                 velocity_component_interpretation);
+//        const std::vector<std::string> velocity_names(dim, "velocity");
+//        const std::vector<
+//                DataComponentInterpretation::DataComponentInterpretation>
+//                velocity_component_interpretation(
+//                dim, DataComponentInterpretation::component_is_part_of_vector);
+//        data_out.add_data_vector(dof_handler_dgrt,
+//                                 darcy_velocity,
+//                                 velocity_names,
+//                                 velocity_component_interpretation);
 
         data_out.build_patches(fe.degree);
         std::ofstream output("solution_interior.eps");
@@ -1017,8 +1036,8 @@ void WGOptimalTransport<dim>::run()
     setup_system();
     assemble_system();
     solve();
-    compute_postprocessed_velocity();
+    //compute_postprocessed_velocity();
     compute_pressure_error();
-    compute_velocity_errors();
+    //compute_velocity_errors();
     output_results();
 }
