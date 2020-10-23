@@ -654,8 +654,6 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
             std::vector<double> solution_interior(n_q_points);
             fe_values[pressure_interior].get_function_values(solution, solution_interior);
 
-            double solution_face = 0;
-
             for (unsigned int q = 0; q < n_q_points; ++q) {
 
 
@@ -674,21 +672,20 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
             {
                 fe_face_values.reinit(cell, face);
 
+                // Compute the value of the solution on the current face
+                std::vector<double> solution_face(n_face_q_points);
+                fe_face_values[pressure_face].get_function_values(solution, solution_face);
+
                 for (unsigned int q = 0; q < n_face_q_points; ++q)
                 {
                     const Tensor<1, dim> normal = fe_face_values.normal_vector(q);
-
-                    // Compute the value of the solution on the interior
-                    for (unsigned int k = 0; k < dofs_per_cell; ++k) {
-                        solution_face += cell_solution(k) * fe_face_values[pressure_face].value(k, q);
-                    }
 
                     // Add the interior part of the discrete weak 2nd-order partial derivative.
                     for (unsigned int i = 0; i < dim; ++i)
                         for (unsigned int j = 0; j < dim; ++j)
                             for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
                             {
-                                cell_pd_matrix(i, j) -= solution_face *
+                                cell_pd_matrix(i, j) -= solution_face[q] *
                                                         normal[i] *
                                                         fe_values_pd.shape_grad(k, q)[j] *
                                                         fe_values_pd.JxW(q);
