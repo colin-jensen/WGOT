@@ -616,7 +616,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
     const unsigned int dofs_per_cell_pd = fe_pd.dofs_per_cell;
 
     const unsigned int n_q_points      = fe_values.get_quadrature().size();
-    const unsigned int n_q_points_pd   = fe_values_pd.get_quadrature().size();
+    //const unsigned int n_q_points_pd   = fe_values_pd.get_quadrature().size();
 
     const unsigned int n_face_q_points = fe_face_values.get_quadrature().size();
 
@@ -650,22 +650,21 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
             // Grab the relevant values from solution vector
             cell->get_dof_values(solution, cell_solution);
 
-            double solution_interior = 0;
+            // Compute the value of the solution on the interior
+            std::vector<double> solution_interior(n_q_points);
+            fe_values[pressure_interior].get_function_values(solution, solution_interior);
+
             double solution_face = 0;
 
             for (unsigned int q = 0; q < n_q_points; ++q) {
 
-                // Compute the value of the solution on the interior
-                for (unsigned int k = 0; k < dofs_per_cell; ++k) {
-                    solution_interior += cell_solution(k) * fe_values[pressure_interior].value(k, q);
-                }
 
                 // Add the interior part of the discrete weak 2nd-order partial derivative.
                 for (unsigned int i = 0; i < dim; ++i)
                     for (unsigned int j = 0; j < dim; ++j)
                         for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
                         {
-                            cell_pd_matrix(i, j) += solution_interior *
+                            cell_pd_matrix(i, j) += solution_interior[q] *
                                                     fe_values_pd.shape_hessian(k, q)[j][i] *
                                                     fe_values_pd.JxW(q);
                         }
