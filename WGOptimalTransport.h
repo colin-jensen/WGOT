@@ -30,6 +30,7 @@
 #include <deal.II/numerics/vector_tools.h>
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/data_out_faces.h>
+#include <deal.II/grid/grid_out.h>
 
 #include <fstream>
 #include <iostream>
@@ -597,8 +598,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
     // interior solution function to the faces.
     FE_Q<dim> fe_etf(fe.degree);
     DoFHandler<dim> dof_handler_etf(triangulation);
-    dof_handler_etf.distribute_dofs(fe_pd);
-
+    dof_handler_etf.distribute_dofs(fe_etf);
 
     const QGauss<dim>     quadrature_formula(fe.degree + 1);
     const QGauss<dim - 1> face_quadrature_formula(fe.degree + 1);
@@ -607,6 +607,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                                 quadrature_formula,
                                 update_values | update_quadrature_points |
                                 update_JxW_values);
+
     FEFaceValues<dim> fe_face_values(fe,
                                      face_quadrature_formula,
                                      update_values | update_normal_vectors |
@@ -624,6 +625,12 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                                      update_values | update_normal_vectors | update_gradients |
                                      update_quadrature_points |
                                      update_JxW_values);
+
+    FEFaceValues<dim> fe_face_values_etf(fe_etf,
+                                        face_quadrature_formula,
+                                        update_values | update_gradients |
+                                        update_quadrature_points |
+                                        update_JxW_values);
 
 
     const unsigned int dofs_per_cell      = fe.dofs_per_cell;
@@ -653,8 +660,9 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
 
     typename DoFHandler<dim>::active_cell_iterator
             cell = dof_handler.begin_active(),
-            endc = dof_handler.end(), cell_pd = dof_handler_pd.begin_active();
-    for (; cell != endc; ++cell, ++cell_pd)
+            endc = dof_handler.end(), cell_pd = dof_handler_pd.begin_active(),
+            cell_etf = dof_handler_etf.begin_active();
+    for (; cell != endc; ++cell, ++cell_pd, ++cell_etf)
     {
         fe_values.reinit(cell);
         fe_values_pd.reinit(cell_pd);
@@ -707,18 +715,18 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                             }
                 }
 
-                // Compute the value of the interior solution gradient on the face quadrature points
-                std::vector<Point<dim>> face_quadrature_points = fe_face_values.get_quadrature_points();
+                fe_face_values_etf.reinit(cell_etf, cell_etf->face_iterator_to_index(face));
 
-                Tensor<1, dim> solution_grad;
-                for (unsigned int q = 0; q < n_face_q_points; ++q)
-                {
-                    for (unsigned int k = 0; k < fe_etf.dofs_per_cell; ++k)
-                    {
-                        solution_grad += solution_face[q] * fe_etf.shape_grad(k, face_quadrature_points[q]);
-                    }
-                }
+                // Grab the global dof indices pertaining to the current cell
+                std::vector<types::global_dof_index> cell_dof_indices(dofs_per_cell);
+                cell->get_dof_indices(cell_dof_indices);
+                auto interior_dofs = std::vector<types::global_dof_index>(cell_dof_indices.begin(),
+                                                                          cell_dof_indices.begin() + 4);
 
+                std::vector<Tensor<1, dim>> solution_grad(n_face_q_points);
+                fe_face_values_etf.get_function_gradients(solution,
+                                                          interior_dofs,
+                                                          solution_grad);
             }
         }
 
