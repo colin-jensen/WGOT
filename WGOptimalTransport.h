@@ -68,7 +68,7 @@ private:
     void make_grid();
     void setup_system();
     void assemble_system_matrix();
-    void assemble_system_rhs();
+    void assemble_system_rhs(unsigned int degree);
     void solve();
     void compute_postprocessed_velocity();
     void compute_velocity_errors();
@@ -589,15 +589,17 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
 }
 
 template<int dim>
-void WGOptimalTransport<dim>::assemble_system_rhs()
+void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
 {
-    FE_DGQ<dim> fe_pd(0);
+    // Create a finite element that will be used to compute discrete weak
+    // 2nd-order partial derivatives.
+    FE_DGQ<dim> fe_pd(degree);
     DoFHandler<dim> dof_handler_pd(triangulation);
     dof_handler_pd.distribute_dofs(fe_pd);
 
-    // Create a standard finite element that will be used for extending the gradient of the
+    // Create a finite element that will be used for extending the gradient of the
     // interior solution function to the faces.
-    FE_Q<dim> fe_etf(fe.degree);
+    FE_DGQ<dim> fe_etf(fe.degree);
     DoFHandler<dim> dof_handler_etf(triangulation);
     dof_handler_etf.distribute_dofs(fe_etf);
 
@@ -622,35 +624,35 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                                      update_JxW_values);
 
     FEFaceValues<dim> fe_face_values_pd(fe_pd,
-                                     face_quadrature_formula,
-                                     update_values | update_normal_vectors | update_gradients |
-                                     update_quadrature_points |
-                                     update_JxW_values);
-
-    FEFaceValues<dim> fe_face_values_etf(fe_etf,
                                         face_quadrature_formula,
-                                        update_values | update_gradients |
+                                        update_values | update_normal_vectors | update_gradients |
                                         update_quadrature_points |
                                         update_JxW_values);
 
+    FEFaceValues<dim> fe_face_values_etf(fe_etf,
+                                         face_quadrature_formula,
+                                         update_values | update_gradients |
+                                         update_quadrature_points);
+
 
     const unsigned int dofs_per_cell      = fe.dofs_per_cell;
-    const unsigned int dofs_per_cell_pd = fe_pd.dofs_per_cell;
+    const unsigned int dofs_per_cell_pd   = fe_pd.dofs_per_cell;
 
     const unsigned int n_q_points      = fe_values.get_quadrature().size();
-    //const unsigned int n_q_points_pd   = fe_values_pd.get_quadrature().size();
-
     const unsigned int n_face_q_points = fe_face_values.get_quadrature().size();
 
     RightHandSide<dim>  right_hand_side;
     std::vector<double> right_hand_side_values(n_q_points);
+    Vector<double>     cell_rhs(dofs_per_cell);
+
+    FullMatrix<double> cell_matrix_G(dim, dim);
+
 
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
-    FullMatrix<double> cell_pd_matrix(dim, dim);
 
-    Vector<double>     cell_rhs(dofs_per_cell);
-    Vector<double>     cell_solution(dofs_per_cell);
+
+
 
     // We need <code>FEValuesExtractors</code> to access the @p interior and
     // @p face component of the shape functions.
@@ -669,7 +671,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
 
         if (!solution.all_zero())
         {
-            cell_pd_matrix = 0;
+            cell_matrix_G = 0;
 
             // Compute the value of the solution on the interior
             std::vector<double> solution_interior(n_q_points);
@@ -683,9 +685,9 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                     for (unsigned int j = 0; j < dim; ++j)
                         for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
                         {
-                            cell_pd_matrix(i, j) += solution_interior[q] *
-                                                    fe_values_pd.shape_hessian(k, q)[j][i] *
-                                                    fe_values_pd.JxW(q);
+                            cell_matrix_G(i, j) += solution_interior[q] *
+                                                   fe_values_pd.shape_hessian(k, q)[j][i] *
+                                                   fe_values_pd.JxW(q);
                         }
             }
 
@@ -707,10 +709,10 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                         for (unsigned int j = 0; j < dim; ++j)
                             for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
                             {
-                                cell_pd_matrix(i, j) -= solution_face[q] *
-                                                        normal[i] *
-                                                        fe_face_values_pd.shape_grad(k, q)[j] *
-                                                        fe_face_values_pd.JxW(q);
+                                cell_matrix_G(i, j) -= solution_face[q] *
+                                                       normal[i] *
+                                                       fe_face_values_pd.shape_grad(k, q)[j] *
+                                                       fe_face_values_pd.JxW(q);
                             }
                 }
 
@@ -770,15 +772,15 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                         for (unsigned int j = 0; j < dim; ++j)
                             for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
                             {
-                                cell_pd_matrix(i, j) += solution_grad[q][i] *
-                                                        normal[j] *
-                                                        fe_face_values_pd.shape_value(k, q) *
-                                                        fe_face_values_pd.JxW(q);
+                                cell_matrix_G(i, j) += solution_grad[q][i] *
+                                                       normal[j] *
+                                                       fe_face_values_pd.shape_value(k, q) *
+                                                       fe_face_values_pd.JxW(q);
                             }
                 }
 
-                std::cout << "cell_pd_matrix:" << cell_pd_matrix.determinant() << std::endl;
-                cell_pd_matrix.print(std::cout);
+                std::cout << "cell_matrix_G:" << cell_matrix_G.determinant() << std::endl;
+                cell_matrix_G.print(std::cout);
 
             }
         }
@@ -1254,9 +1256,9 @@ void WGOptimalTransport<dim>::run()
     make_grid();
     setup_system();
     assemble_system_matrix();
-    assemble_system_rhs();
+    assemble_system_rhs(0);
     solve();
-    assemble_system_rhs();
+    assemble_system_rhs(0);
     //compute_postprocessed_velocity();
     //compute_pressure_error();
     //compute_velocity_errors();
