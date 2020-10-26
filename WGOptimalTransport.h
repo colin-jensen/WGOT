@@ -645,7 +645,11 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
     std::vector<double> right_hand_side_values(n_q_points);
     Vector<double>     cell_rhs(dofs_per_cell);
 
-    FullMatrix<double> cell_matrix_G(dim, dim);
+    FullMatrix<double> cell_matrix_M(dofs_per_cell_pd,
+                                     dofs_per_cell_pd);
+    Vector<double> cell_vector_G(dofs_per_cell_pd);
+    Vector<double> cell_partial_deriv(dofs_per_cell_pd);
+    FullMatrix<double> cell_hessian(dim, dim);
 
 
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
@@ -669,122 +673,119 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
         fe_values.reinit(cell);
         fe_values_pd.reinit(cell_pd);
 
-        if (!solution.all_zero())
-        {
-            cell_matrix_G = 0;
+        if (!solution.all_zero()) {
+            for (unsigned int i = 0; i < dim; ++i)
+                for (unsigned int j = 0; j < dim; ++j) {
 
-            // Compute the value of the solution on the interior
-            std::vector<double> solution_interior(n_q_points);
-            fe_values[pressure_interior].get_function_values(solution, solution_interior);
+                    cell_matrix_M = 0;
+                    cell_partial_deriv = 0;
+                    cell_vector_G = 0;
 
-            for (unsigned int q = 0; q < n_q_points; ++q) {
+                    // Compute the value of the solution on the interior
+                    std::vector<double> solution_interior(n_q_points);
+                    fe_values[pressure_interior].get_function_values(solution, solution_interior);
 
+                    for (unsigned int q = 0; q < n_q_points; ++q) {
+                        for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
+                            // Add the interior part of the discrete weak 2nd-order partial derivative.
+                            cell_vector_G(k) += solution_interior[q] *
+                                                fe_values_pd.shape_hessian(k, q)[j][i] *
+                                                fe_values_pd.JxW(q);
 
-                // Add the interior part of the discrete weak 2nd-order partial derivative.
-                for (unsigned int i = 0; i < dim; ++i)
-                    for (unsigned int j = 0; j < dim; ++j)
-                        for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
-                        {
-                            cell_matrix_G(i, j) += solution_interior[q] *
-                                                   fe_values_pd.shape_hessian(k, q)[j][i] *
-                                                   fe_values_pd.JxW(q);
-                        }
-            }
-
-            for (const auto &face : cell->face_iterators())
-            {
-                fe_face_values.reinit(cell, face);
-                fe_face_values_pd.reinit(cell_pd, face);
-
-                // Compute the value of the solution on the current face
-                std::vector<double> solution_face(n_face_q_points);
-                fe_face_values[pressure_face].get_function_values(solution, solution_face);
-
-                for (unsigned int q = 0; q < n_face_q_points; ++q)
-                {
-                    const Tensor<1, dim> normal = fe_face_values_pd.normal_vector(q);
-
-                    // Add the interior part of the discrete weak 2nd-order partial derivative.
-                    for (unsigned int i = 0; i < dim; ++i)
-                        for (unsigned int j = 0; j < dim; ++j)
-                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
-                            {
-                                cell_matrix_G(i, j) -= solution_face[q] *
-                                                       normal[i] *
-                                                       fe_face_values_pd.shape_grad(k, q)[j] *
-                                                       fe_face_values_pd.JxW(q);
+                            // Compute the mass matrix m
+                            for (unsigned int m = 0; m < dofs_per_cell_pd; ++m) {
+                                cell_matrix_M(k, m) += fe_values_pd.shape_value(k, q) *
+                                                       fe_values_pd.shape_value(m, q) *
+                                                       fe_values_pd.JxW(q);
                             }
-                }
-
-                fe_face_values_etf.reinit(cell_etf, cell_etf->face_iterator_to_index(face));
-
-                // Grab the global dof indices pertaining to the current cell
-                std::vector<types::global_dof_index> cell_dof_indices(dofs_per_cell);
-                cell->get_dof_indices(cell_dof_indices);
-                auto interior_dofs = std::vector<types::global_dof_index>(cell_dof_indices.begin(),
-                                                                          cell_dof_indices.begin() + 4);
-
-                std::vector<Tensor<1, dim>> solution_grad(n_face_q_points);
-                fe_face_values_etf.get_function_gradients(solution,
-                                                          interior_dofs,
-                                                          solution_grad);
-
-                if (!face->at_boundary())
-                {
-                    std::vector<typename DoFHandler<dim>::active_cell_iterator> neighbors(4);
-                    GridTools::get_active_neighbors<DoFHandler<dim>>(cell, neighbors);
-
-                    int face_neighbor_index = -1;
-                    for (unsigned int n = 0; n < neighbors.size(); ++n)
-                    {
-                        for (auto n_face : neighbors[n]->face_iterators())
-                        {
-                            if (n_face == face) face_neighbor_index = n;
                         }
                     }
 
-                    auto neighbor = dof_handler_etf.begin_active();
-                    for (unsigned int i = 0; i < neighbors[face_neighbor_index]->active_cell_index(); ++i) ++neighbor;
+                    for (const auto &face : cell->face_iterators()) {
+                        fe_face_values.reinit(cell, face);
+                        fe_face_values_pd.reinit(cell_pd, face);
 
-                    fe_face_values_etf.reinit(neighbor, face);
+                        // Compute the value of the solution on the current face
+                        std::vector<double> solution_face(n_face_q_points);
+                        fe_face_values[pressure_face].get_function_values(solution, solution_face);
 
-                    // Grab the global dof indices pertaining to the current cell
-                    std::vector<types::global_dof_index> neighbor_dof_indices(dofs_per_cell);
-                    neighbors[face_neighbor_index]->get_dof_indices(neighbor_dof_indices);
-                    auto neighbor_interior_dofs = std::vector<types::global_dof_index>(neighbor_dof_indices.begin(),
-                                                                              neighbor_dof_indices.begin() + 4);
+                        for (unsigned int q = 0; q < n_face_q_points; ++q) {
+                            const Tensor<1, dim> normal = fe_face_values_pd.normal_vector(q);
 
-
-                    std::vector<Tensor<1, dim>> neighbor_solution_grad(n_face_q_points);
-                    fe_face_values_etf.get_function_gradients(solution,
-                                                              neighbor_interior_dofs,
-                                                              neighbor_solution_grad);
-                    for (unsigned int q = 0; q < n_face_q_points; ++q)
-                    {
-                        solution_grad[q] = 0.5 * solution_grad[q] + neighbor_solution_grad[q];
-                    }
-                }
-
-                for (unsigned int q = 0; q < n_face_q_points; ++q)
-                {
-                    const Tensor<1, dim> normal = fe_face_values_pd.normal_vector(q);
-                    for (unsigned int i = 0; i < dim; ++i)
-                        for (unsigned int j = 0; j < dim; ++j)
-                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
-                            {
-                                cell_matrix_G(i, j) += solution_grad[q][i] *
-                                                       normal[j] *
-                                                       fe_face_values_pd.shape_value(k, q) *
-                                                       fe_face_values_pd.JxW(q);
+                            // Add the interior part of the discrete weak 2nd-order partial derivative.
+                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
+                                cell_vector_G(k) -= solution_face[q] *
+                                                    normal[i] *
+                                                    fe_face_values_pd.shape_grad(k, q)[j] *
+                                                    fe_face_values_pd.JxW(q);
                             }
+                        }
+
+                        fe_face_values_etf.reinit(cell_etf, cell_etf->face_iterator_to_index(face));
+
+                        // Grab the global dof indices pertaining to the current cell
+                        std::vector<types::global_dof_index> cell_dof_indices(dofs_per_cell);
+                        cell->get_dof_indices(cell_dof_indices);
+                        auto interior_dofs = std::vector<types::global_dof_index>(cell_dof_indices.begin(),
+                                                                                  cell_dof_indices.begin() + 4);
+
+                        std::vector<Tensor<1, dim>> solution_grad(n_face_q_points);
+                        fe_face_values_etf.get_function_gradients(solution,
+                                                                  interior_dofs,
+                                                                  solution_grad);
+
+                        if (!face->at_boundary()) {
+                            std::vector<typename DoFHandler<dim>::active_cell_iterator> neighbors(4);
+                            GridTools::get_active_neighbors<DoFHandler<dim>>(cell, neighbors);
+
+                            int face_neighbor_index = -1;
+                            for (unsigned int n = 0; n < neighbors.size(); ++n) {
+                                for (auto n_face : neighbors[n]->face_iterators()) {
+                                    if (n_face == face) face_neighbor_index = n;
+                                }
+                            }
+
+                            auto neighbor = dof_handler_etf.begin_active();
+                            for (unsigned int i = 0; i < neighbors[face_neighbor_index]->active_cell_index(); ++i)
+                                ++neighbor;
+
+                            fe_face_values_etf.reinit(neighbor, face);
+
+                            // Grab the global dof indices pertaining to the current cell
+                            std::vector<types::global_dof_index> neighbor_dof_indices(dofs_per_cell);
+                            neighbors[face_neighbor_index]->get_dof_indices(neighbor_dof_indices);
+                            auto neighbor_interior_dofs = std::vector<types::global_dof_index>(
+                                    neighbor_dof_indices.begin(),
+                                    neighbor_dof_indices.begin() + 4);
+
+
+                            std::vector<Tensor<1, dim>> neighbor_solution_grad(n_face_q_points);
+                            fe_face_values_etf.get_function_gradients(solution,
+                                                                      neighbor_interior_dofs,
+                                                                      neighbor_solution_grad);
+
+                            // Take the average of the two gradients
+                            for (unsigned int q = 0; q < n_face_q_points; ++q) {
+                                solution_grad[q] = 0.5 * solution_grad[q] + 0.5 * neighbor_solution_grad[q];
+                            }
+                        }
+
+                        for (unsigned int q = 0; q < n_face_q_points; ++q) {
+                            const Tensor<1, dim> normal = fe_face_values_pd.normal_vector(q);
+
+                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
+                                cell_vector_G(k) += solution_grad[q][i] *
+                                                    normal[j] *
+                                                    fe_face_values_pd.shape_value(k, q) *
+                                                    fe_face_values_pd.JxW(q);
+                            }
+                        }
+
+                    }
+
+                    cell_matrix_M.gauss_jordan();
                 }
-
-                std::cout << "cell_matrix_G:" << cell_matrix_G.determinant() << std::endl;
-                cell_matrix_G.print(std::cout);
-
-            }
         }
-
 
 
 
