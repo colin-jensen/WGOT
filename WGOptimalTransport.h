@@ -229,6 +229,25 @@ Tensor<1, dim> ExactVelocity<dim>::value(const Point<dim> &p) const
     return return_value;
 }
 
+template<int dim>
+class ExactHessianDet : public Function<dim>
+{
+public:
+    ExactHessianDet() : Function<dim>(2) {}
+
+    virtual double value(const Point<dim> &p, const unsigned int component) const override;
+
+};
+
+template<int dim>
+double ExactHessianDet<dim>::value(const Point<dim> &p, const unsigned int /*component*/) const
+{
+    return std::pow(numbers::PI, 4) * (std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[0]) *
+                                       std::cos(numbers::PI * p[1]) * std::cos(numbers::PI * p[1]) -
+                                       std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[0]) *
+                                       std::sin(numbers::PI * p[1]) * std::sin(numbers::PI * p[1]));
+}
+
 
 
 // @sect3{WGOptimalTransport class implementation}
@@ -255,7 +274,7 @@ template <int dim>
 void WGOptimalTransport<dim>::make_grid()
 {
     GridGenerator::hyper_cube(triangulation, 0, 1);
-    triangulation.refine_global(1);
+    triangulation.refine_global(5);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -649,7 +668,13 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                                      dofs_per_cell_pd);
     Vector<double> cell_vector_G(dofs_per_cell_pd);
     Vector<double> cell_partial_deriv(dofs_per_cell_pd);
-    FullMatrix<double> cell_hessian(dim, dim);
+    std::vector<std::vector<Vector<double>>> cell_partial_derivs(dim,
+                                                                 std::vector<Vector<double>> (dim,
+                                                                                              cell_partial_deriv));
+    ExactHessianDet<dim> exact_hessian_det;
+    std::vector<double> exact_hessian_det_values(n_q_points);
+
+    std::vector<double> cell_det_hessian(n_q_points);
 
 
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
@@ -674,6 +699,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
         fe_values_pd.reinit(cell_pd);
 
         if (!solution.all_zero()) {
+
             for (unsigned int i = 0; i < dim; ++i)
                 for (unsigned int j = 0; j < dim; ++j) {
 
@@ -784,14 +810,36 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                     }
 
                     cell_matrix_M.gauss_jordan();
+                    cell_matrix_M.vmult(cell_partial_deriv, cell_vector_G);
+                    cell_partial_derivs[i][j] = cell_partial_deriv;
                 }
+
+            FullMatrix<double> cell_hessian(dim, dim);
+            for (unsigned int i = 0; i < dim; ++i)
+                for (unsigned int j = 0; j < dim; ++j)
+                    for (unsigned int q = 0; q < n_q_points; ++q)
+                        for (unsigned int k = 0; k < dofs_per_cell_pd; ++k)
+                            cell_hessian(i, j) += cell_partial_derivs[i][j][k] * fe_values_pd.shape_value(k, q);
+
+            for (unsigned int q = 0; q < n_q_points; ++q)
+            {
+                cell_det_hessian[q] = cell_hessian.determinant();
+            }
+
+            exact_hessian_det.value_list(fe_values_pd.get_quadrature_points(), exact_hessian_det_values);
+
+            double error = 0;
+            for (unsigned int q = 0; q < n_q_points; ++q) {
+                error += std::abs(exact_hessian_det_values[q] - cell_det_hessian[q]);
+            }
+            std::cout << "error: " << error << std::endl;
+
         }
-
-
-
 
         right_hand_side.value_list(fe_values.get_quadrature_points(),
                                    right_hand_side_values);
+
+
 
         cell_rhs = 0;
         for (unsigned int q = 0; q < n_q_points; ++q)
