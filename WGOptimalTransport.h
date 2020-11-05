@@ -274,7 +274,7 @@ template <int dim>
 void WGOptimalTransport<dim>::make_grid()
 {
     GridGenerator::hyper_cube(triangulation, 0, 1);
-    triangulation.refine_global(1);
+    triangulation.refine_global(2);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -780,26 +780,14 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                         fe_face_values_etf.get_function_values(solution, interior_dofs, solution_face_t);
 
                         if (!face->at_boundary()) {
-                            std::vector<typename DoFHandler<dim>::active_cell_iterator>
-                                    neighbors(triangulation.max_adjacent_cells());
-                            GridTools::get_active_neighbors<DoFHandler<dim>>(cell, neighbors);
 
-                            int face_neighbor_index = -1;
-                            for (unsigned int n = 0; n < neighbors.size(); ++n) {
-                                for (auto n_face : neighbors[n]->face_iterators()) {
-                                    if (n_face == face) face_neighbor_index = n;
-                                }
-                            }
-
-                            auto neighbor = dof_handler_etf.begin_active();
-                            for (unsigned int i = 0; i < neighbors[face_neighbor_index]->active_cell_index(); ++i)
-                                ++neighbor;
-
-                            fe_face_values_etf.reinit(neighbor, face);
+                            const auto neighbor_etf = cell_etf->neighbor(cell_etf->face_iterator_to_index(face));
+                            fe_face_values_etf.reinit(neighbor_etf, face);
 
                             // Grab the global dof indices pertaining to the current cell
+                            const auto neighbor = cell->neighbor(cell->face_iterator_to_index(face));
                             std::vector<types::global_dof_index> neighbor_dof_indices(dofs_per_cell);
-                            neighbors[face_neighbor_index]->get_dof_indices(neighbor_dof_indices);
+                            neighbor->get_dof_indices(neighbor_dof_indices);
                             auto neighbor_interior_dofs = std::vector<types::global_dof_index>(
                                     neighbor_dof_indices.end() - 4,
                                     neighbor_dof_indices.end());
@@ -1332,8 +1320,8 @@ void WGOptimalTransport<dim>::run()
 {
     make_grid();
     setup_system();
-    assemble_system_matrix();
-    assemble_system_rhs(0);
+    //assemble_system_matrix();
+    //assemble_system_rhs(0);
     ExactPressure<dim> exact;
     VectorTools::interpolate(dof_handler, exact, solution);
     //solve();
