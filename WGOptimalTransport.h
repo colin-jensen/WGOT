@@ -274,7 +274,7 @@ template <int dim>
 void WGOptimalTransport<dim>::make_grid()
 {
     GridGenerator::hyper_cube(triangulation, 0, 1);
-    triangulation.refine_global(2);
+    triangulation.refine_global(5);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -623,12 +623,21 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
     dof_handler_etf.distribute_dofs(fe_etf);
 
     const QGauss<dim>     quadrature_formula(fe.degree + 1);
+    Point<dim> cell_center(0.5, 0.5);
+    Point<dim - 1> face_midpoint(0.5);
+    const Quadrature<dim> quadrature_cell_center({cell_center}, {1});
+    const Quadrature<dim - 1> quadrature_face_midpoint({face_midpoint}, {1});
     const QGauss<dim - 1> face_quadrature_formula(fe.degree + 1);
 
     FEValues<dim>     fe_values(fe,
                                 quadrature_formula,
-                                update_values | update_quadrature_points |
+                                update_values | update_quadrature_points | update_gradients |
                                 update_JxW_values);
+
+    FEValues<dim> fe_values_center(fe,
+                                   quadrature_cell_center,
+                                   update_values | update_quadrature_points | update_gradients |
+                                   update_JxW_values);
 
     FEFaceValues<dim> fe_face_values(fe,
                                      face_quadrature_formula,
@@ -649,7 +658,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                                         update_JxW_values);
 
     FEFaceValues<dim> fe_face_values_etf(fe_etf,
-                                         face_quadrature_formula,
+                                         quadrature_face_midpoint,
                                          update_values | update_gradients |
                                          update_quadrature_points);
 
@@ -741,7 +750,9 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                         }
                     }
 
-                    for (const auto &face : cell->face_iterators()) {
+                    for (unsigned int f=0; f<GeometryInfo<dim>::faces_per_cell; ++f) {
+
+                        const auto face = cell->face(f);
                         fe_face_values.reinit(cell, face);
                         fe_face_values_pd.reinit(cell_pd, face);
 
@@ -761,54 +772,40 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                             }
                         }
 
-                        fe_face_values_etf.reinit(cell_etf, cell_etf->face_iterator_to_index(face));
+                        // Approximate a value for the gradient of the solution on the face.
+                        std::vector<Tensor<1, dim>> solution_grad(quadrature_cell_center.size());
 
-                        // Grab the global dof indices pertaining to the current cell
-                        std::vector<types::global_dof_index> cell_dof_indices(dofs_per_cell);
-                        cell->get_dof_indices(cell_dof_indices);
-                        auto interior_dofs = std::vector<types::global_dof_index>(cell_dof_indices.end() - 4,
-                                                                                  cell_dof_indices.end());
+                        if (face->at_boundary()) {
+                            // Get value of the interior solution gradient at the face midpoint
+                            fe_face_values_etf.reinit(cell_etf, cell_etf->face(f));
 
-                        std::vector<Tensor<1, dim>> solution_grad(n_face_q_points);
-                        fe_face_values_etf.get_function_gradients(solution,
-                                                                  interior_dofs,
-                                                                  solution_grad);
-
-                        std::vector<Point<dim>> q_points = fe_face_values_etf.get_quadrature_points();
-
-                        std::vector<double> solution_face_t(n_face_q_points);
-                        fe_face_values_etf.get_function_values(solution, interior_dofs, solution_face_t);
-
-                        if (!face->at_boundary()) {
-
-                            const auto neighbor_etf = cell_etf->neighbor(cell_etf->face_iterator_to_index(face));
-                            fe_face_values_etf.reinit(neighbor_etf, face);
-
-                            // Grab the global dof indices pertaining to the current cell
-                            const auto neighbor = cell->neighbor(cell->face_iterator_to_index(face));
-                            std::vector<types::global_dof_index> neighbor_dof_indices(dofs_per_cell);
-                            neighbor->get_dof_indices(neighbor_dof_indices);
-                            auto neighbor_interior_dofs = std::vector<types::global_dof_index>(
-                                    neighbor_dof_indices.end() - 4,
-                                    neighbor_dof_indices.end());
-
-
-                            std::vector<Tensor<1, dim>> neighbor_solution_grad(n_face_q_points);
+                            cell->get_dof_indices(local_dof_indices);
+                            auto interior_dofs = std::vector<types::global_cell_index>(local_dof_indices.end() - 4,
+                                                                                       local_dof_indices.end());
                             fe_face_values_etf.get_function_gradients(solution,
-                                                                      neighbor_interior_dofs,
-                                                                      neighbor_solution_grad);
+                                                                      interior_dofs,
+                                                                      solution_grad);
 
-                            // Take the average of the two gradients
-                            for (unsigned int q = 0; q < n_face_q_points; ++q) {
-                                solution_grad[q] = 0.5 * (solution_grad[q] + neighbor_solution_grad[q]);
-                            }
+                        }
+                        else {
+                            // Get the value of the solution gradient at the neighbor center and
+                            // average with the solution gradient at the current cell center.
+                            fe_values_center.reinit(cell);
+                            fe_values_center[pressure_interior].get_function_gradients(solution, solution_grad);
+
+                            const auto neighbor = cell->neighbor(cell->face_iterator_to_index(face));
+                            std::vector<Tensor<1, dim>> neighbor_solution_grad(quadrature_cell_center.size());
+                            fe_values_center.reinit(neighbor);
+                            fe_values_center[pressure_interior].get_function_gradients(solution, solution_grad);
+
+                            solution_grad[0] = 0.5 * (solution_grad[0] + neighbor_solution_grad[0]);
                         }
 
                         for (unsigned int q = 0; q < n_face_q_points; ++q) {
                             const Tensor<1, dim> normal = fe_face_values_pd.normal_vector(q);
 
                             for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
-                                cell_vector_G(k) += solution_grad[q][i] *
+                                cell_vector_G(k) += solution_grad[0][i] *
                                                     normal[j] *
                                                     fe_face_values_pd.shape_value(k, q) *
                                                     fe_face_values_pd.JxW(q);
