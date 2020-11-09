@@ -665,14 +665,6 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
 
     const unsigned int dofs_per_cell      = fe.dofs_per_cell;
 
-//    for (auto i = 0; i<dofs_per_cell; ++i)
-//    {
-//        std::pair bob = fe.system_to_component_index(i);
-//        std::cout << bob.first << " " << bob.second << std::endl;
-//    }
-//
-//    return;
-
 
     const unsigned int dofs_per_cell_pd   = fe_pd.dofs_per_cell;
 
@@ -780,8 +772,15 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                             fe_face_values_etf.reinit(cell_etf, cell_etf->face(f));
 
                             cell->get_dof_indices(local_dof_indices);
-                            auto interior_dofs = std::vector<types::global_cell_index>(local_dof_indices.end() - 4,
-                                                                                       local_dof_indices.end());
+                            std::vector<types::global_cell_index> interior_dofs;
+
+                            // Filter out the dofs pertaining to the interior component of the FESystem
+                            for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+                                auto index_pair = fe.system_to_component_index(i);
+                                if (index_pair.first == 0) {
+                                    interior_dofs.push_back(local_dof_indices[i]);
+                                }
+                            }
                             fe_face_values_etf.get_function_gradients(solution,
                                                                       interior_dofs,
                                                                       solution_grad);
@@ -793,10 +792,10 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                             fe_values_center.reinit(cell);
                             fe_values_center[pressure_interior].get_function_gradients(solution, solution_grad);
 
-                            const auto neighbor = cell->neighbor(cell->face_iterator_to_index(face));
+                            const auto neighbor = cell->neighbor(f);
                             std::vector<Tensor<1, dim>> neighbor_solution_grad(quadrature_cell_center.size());
                             fe_values_center.reinit(neighbor);
-                            fe_values_center[pressure_interior].get_function_gradients(solution, solution_grad);
+                            fe_values_center[pressure_interior].get_function_gradients(solution, neighbor_solution_grad);
 
                             solution_grad[0] = 0.5 * (solution_grad[0] + neighbor_solution_grad[0]);
                         }
