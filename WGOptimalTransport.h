@@ -200,7 +200,7 @@ template <int dim>
 double ExactPressure<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
-    return std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+    return std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
 }
 
 
@@ -274,7 +274,7 @@ template <int dim>
 void WGOptimalTransport<dim>::make_grid()
 {
     GridGenerator::hyper_cube(triangulation, 0, 1);
-    triangulation.refine_global(5);
+    triangulation.refine_global(1);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -702,12 +702,15 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
     const FEValuesExtractors::Scalar pressure_interior(0);
     const FEValuesExtractors::Scalar pressure_face(1);
 
+    ExactVelocity<dim> exact_grad;
+
     typename DoFHandler<dim>::active_cell_iterator
             cell = dof_handler.begin_active(),
             endc = dof_handler.end(),
             cell_pd = dof_handler_pd.begin_active(),
             cell_etf = dof_handler_etf.begin_active();
-    
+
+    std::vector<double> errors_in_solution_gradient;
     for (; cell != endc; ++cell, ++cell_pd, ++cell_etf)
     {
         fe_values.reinit(cell);
@@ -742,7 +745,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                         }
                     }
 
-                    for (unsigned int f=0; f<GeometryInfo<dim>::faces_per_cell; ++f) {
+                    for (unsigned int f=0; f < GeometryInfo<dim>::faces_per_cell; ++f) {
 
                         const auto face = cell->face(f);
                         fe_face_values.reinit(cell, face);
@@ -784,6 +787,11 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                             fe_face_values_etf.get_function_gradients(solution,
                                                                       interior_dofs,
                                                                       solution_grad);
+
+                            // Compare this grad with the exct grad
+                            auto error = solution_grad[0] - exact_grad.value(fe_face_values_etf.get_quadrature_points()[0]);
+                            errors_in_solution_gradient.push_back(std::abs(error[0]));
+                            errors_in_solution_gradient.push_back(std::abs(error[1]));
 
                         }
                         else {
@@ -844,7 +852,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
             for (unsigned int q = 0; q < n_q_points; ++q) {
                 error += std::abs(exact_hessian_det_values[q] - cell_det_hessian[q]);
             }
-            std::cout << "error: " << error << std::endl;
+//            std::cout << "error: " << error << std::endl;
 
         }
 
@@ -864,6 +872,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
         constraints.distribute_local_to_global(
                 cell_rhs, local_dof_indices, system_rhs);
     }
+    std::cout << "max error: " << *std::max_element(errors_in_solution_gradient.begin(), errors_in_solution_gradient.end()) << std::endl;
 }
 
 
