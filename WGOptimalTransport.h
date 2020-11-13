@@ -183,24 +183,151 @@ double RightHandSide<dim>::value(const Point<dim> &p,
 // interface pressures, and when we compute errors, we will want to
 // use the same pressure solution to test both of these components.
 template <int dim>
-class ExactPressure : public Function<dim>
+class Cos_pi_x_Cos_pi_y : public Function<dim>
 {
 public:
-    ExactPressure()
+    Cos_pi_x_Cos_pi_y()
             : Function<dim>(2)
     {}
 
     virtual double value(const Point<dim> & p,
+                         const unsigned int component) const override;
+    virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
                          const unsigned int component) const override;
 };
 
 
 
 template <int dim>
-double ExactPressure<dim>::value(const Point<dim> &p,
+double Cos_pi_x_Cos_pi_y<dim>::value(const Point<dim> &p,
+                                 const unsigned int /*component*/) const
+{
+    return std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+}
+
+template <int dim>
+SymmetricTensor<dim, dim> Cos_pi_x_Cos_pi_y<dim>::hessian(const Point<dim> &p,
+                                     const unsigned int /*component*/) const
+{
+    SymmetricTensor<dim, dim> return_value;
+    return_value[0][0] = -numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
+                         std::cos(numbers::PI * p[1]);
+    return_value[0][1] = numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
+                         std::sin(numbers::PI * p[1]);
+    return_value[1][0] = numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
+                         std::sin(numbers::PI * p[1]);
+    return_value[1][1] = -numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
+                         std::cos(numbers::PI * p[1]);
+    return return_value;
+}
+
+template <int dim>
+class Sin_pi_x_Sin_pi_y : public Function<dim>
+{
+public:
+    Sin_pi_x_Sin_pi_y()
+            : Function<dim>(2)
+    {}
+
+    virtual double value(const Point<dim> & p,
+                         const unsigned int component) const override;
+    virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
+                         const unsigned int component) const override;
+};
+
+
+
+template <int dim>
+double Sin_pi_x_Sin_pi_y<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
     return std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
+}
+
+template <int dim>
+SymmetricTensor<dim, dim> Sin_pi_x_Sin_pi_y<dim>::hessian(const Point<dim> &p,
+                                                          const unsigned int /*component*/) const
+{
+    SymmetricTensor<dim, dim> return_value;
+    return_value[0][0] = -numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
+                         std::sin(numbers::PI * p[1]);
+    return_value[0][1] = numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
+                         std::cos(numbers::PI * p[1]);
+    return_value[1][0] = numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
+                         std::cos(numbers::PI * p[1]);
+    return_value[1][1] = -numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
+                         std::sin(numbers::PI * p[1]);
+    return return_value;
+}
+
+template <int dim>
+class X_2_Y_2 : public Function<dim>
+{
+public:
+    X_2_Y_2()
+            : Function<dim>(2)
+    {}
+
+    virtual double value(const Point<dim> & p,
+                         const unsigned int component) const override;
+    virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
+                                              const unsigned int component) const override;
+};
+
+
+
+template <int dim>
+double X_2_Y_2<dim>::value(const Point<dim> &p,
+                                     const unsigned int /*component*/) const
+{
+    return p[0] * p[0] * p[1] * p[1];
+}
+
+template <int dim>
+SymmetricTensor<dim, dim> X_2_Y_2<dim>::hessian(const Point<dim> &p,
+                                                          const unsigned int /*component*/) const
+{
+    SymmetricTensor<dim, dim> return_value;
+    return_value[0][0] = 2*p[1]*p[1];
+    return_value[0][1] = 4*p[0]*p[0];
+    return_value[1][0] = 4*p[0]*p[0];
+    return_value[1][1] = 2*p[1]*p[1];
+    return return_value;
+}
+
+template <int dim>
+class Bump : public Function<dim>
+{
+public:
+    Bump()
+            : Function<dim>(2)
+    {}
+
+    virtual double value(const Point<dim> & p,
+                         const unsigned int component) const override;
+    virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
+                                              const unsigned int component) const override;
+};
+
+
+
+template <int dim>
+double Bump<dim>::value(const Point<dim> &p,
+                           const unsigned int /*component*/) const
+{
+    return std::exp(-1 / (1 - p[0] * p[0] - p[1] - p[1] ));
+}
+
+template <int dim>
+SymmetricTensor<dim, dim> Bump<dim>::hessian(const Point<dim> &p,
+                                                const unsigned int /*component*/) const
+{
+    SymmetricTensor<dim, dim> return_value;
+    return_value[0][0] = 2*p[1]*p[1];
+    return_value[0][1] = 4*p[0]*p[0];
+    return_value[1][0] = 4*p[0]*p[0];
+    return_value[1][1] = 2*p[1]*p[1];
+    return return_value;
 }
 
 
@@ -222,10 +349,38 @@ template <int dim>
 Tensor<1, dim> ExactVelocity<dim>::value(const Point<dim> &p) const
 {
     Tensor<1, dim> return_value;
-    return_value[0] = -numbers::PI * std::cos(numbers::PI * p[0]) *
-                      std::sin(numbers::PI * p[1]);
-    return_value[1] = -numbers::PI * std::sin(numbers::PI * p[0]) *
+    return_value[0] = -numbers::PI * std::sin(numbers::PI * p[0]) *
                       std::cos(numbers::PI * p[1]);
+    return_value[1] = -numbers::PI * std::cos(numbers::PI * p[0]) *
+                      std::sin(numbers::PI * p[1]);
+    return return_value;
+}
+
+template <int dim>
+class ExactHessian : public TensorFunction<dim, dim>
+{
+public:
+    ExactHessian()
+            : TensorFunction<dim, dim>()
+    {}
+
+    virtual Tensor<dim, dim> value(const Point<dim> &p) const override;
+};
+
+
+
+template <int dim>
+Tensor<dim, dim> ExactHessian<dim>::value(const Point<dim> &p) const
+{
+    Tensor<dim, dim> return_value;
+    return_value[0][0] = -numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
+                          std::cos(numbers::PI * p[1]);
+    return_value[0][1] = numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
+                         std::sin(numbers::PI * p[1]);
+    return_value[1][0] = numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
+                         std::sin(numbers::PI * p[1]);
+    return_value[1][1] = -numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
+                         std::cos(numbers::PI * p[1]);
     return return_value;
 }
 
@@ -273,8 +428,8 @@ WGOptimalTransport<dim>::WGOptimalTransport(const unsigned int degree)
 template <int dim>
 void WGOptimalTransport<dim>::make_grid()
 {
-    GridGenerator::hyper_cube(triangulation, 0, 1);
-    triangulation.refine_global(1);
+    GridGenerator::hyper_cube(triangulation, -1, 1);
+    triangulation.refine_global(5);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -702,7 +857,9 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
     const FEValuesExtractors::Scalar pressure_interior(0);
     const FEValuesExtractors::Scalar pressure_face(1);
 
-    ExactVelocity<dim> exact_grad;
+    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
+    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
+    X_2_Y_2<dim> x_2_y_2;
 
     typename DoFHandler<dim>::active_cell_iterator
             cell = dof_handler.begin_active(),
@@ -788,11 +945,6 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                                                                       interior_dofs,
                                                                       solution_grad);
 
-                            // Compare this grad with the exct grad
-                            auto error = solution_grad[0] - exact_grad.value(fe_face_values_etf.get_quadrature_points()[0]);
-                            errors_in_solution_gradient.push_back(std::abs(error[0]));
-                            errors_in_solution_gradient.push_back(std::abs(error[1]));
-
                         }
                         else {
                             // Get the value of the solution gradient at the neighbor center and
@@ -823,6 +975,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
 
                     // Solve for the coefficients of the discrete weak 2nd-order partial derivative on this cell
                     cell_matrix_M.gauss_jordan();
+
                     cell_matrix_M.vmult(cell_partial_deriv, cell_vector_G);
 
                     // Get the value of the discrete weak 2nd-order partial derivative at each quad point in this cell
@@ -831,6 +984,9 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                     fe_values_pd.get_function_values(cell_partial_deriv,
                                                      local_dof_indices_pd,
                                                      cell_partial_derivs[i][j]);
+                    fe_values_center.reinit(cell);
+                    auto ex = cos_pi_x_cos_pi_y.hessian(fe_values_center.get_quadrature_points()[0], 0);
+                    errors_in_solution_gradient.push_back(std::abs(ex[i][j] - cell_partial_deriv[0]));
                 }
 
             for (unsigned int q = 0; q < n_q_points; ++q) {
@@ -1327,8 +1483,10 @@ void WGOptimalTransport<dim>::run()
     setup_system();
     //assemble_system_matrix();
     //assemble_system_rhs(0);
-    ExactPressure<dim> exact;
-    VectorTools::interpolate(dof_handler, exact, solution);
+    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
+    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
+    X_2_Y_2<dim> x_2_y_2;
+    VectorTools::interpolate(dof_handler, cos_pi_x_cos_pi_y, solution);
     //solve();
     assemble_system_rhs(0);
     //compute_postprocessed_velocity();
