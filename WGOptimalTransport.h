@@ -38,6 +38,7 @@
 
 
 
+
 using namespace dealii;
 
 // @sect3{The WGOptimalTransport class template}
@@ -70,9 +71,6 @@ private:
     void assemble_system_matrix();
     void assemble_system_rhs(unsigned int degree);
     void solve();
-    void compute_postprocessed_velocity();
-    void compute_velocity_errors();
-    void compute_pressure_error();
     void output_results() const;
 
     Triangulation<dim> triangulation;
@@ -194,6 +192,8 @@ public:
                          const unsigned int component) const override;
     virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
                          const unsigned int component) const override;
+    virtual Tensor<1, dim> gradient(const Point<dim> & p,
+                                              const unsigned int component) const override;
 };
 
 
@@ -203,6 +203,17 @@ double Cos_pi_x_Cos_pi_y<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
     return std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+}
+
+template <int dim>
+Tensor<1, dim> Cos_pi_x_Cos_pi_y<dim>::gradient(const Point<dim> & p,
+                                  const unsigned int /*component*/) const
+{
+    Tensor<1, dim> grad;
+    grad[0] = -numbers::PI * std::sin(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+    grad[1] = -numbers::PI * std::sin(numbers::PI * p[1]) * std::cos(numbers::PI * p[0]);
+
+    return grad;
 }
 
 template <int dim>
@@ -428,7 +439,7 @@ WGOptimalTransport<dim>::WGOptimalTransport(const unsigned int degree)
 template <int dim>
 void WGOptimalTransport<dim>::make_grid()
 {
-    GridGenerator::hyper_cube(triangulation, -1, 1);
+    GridGenerator::hyper_cube(triangulation, 0, 1);
     triangulation.refine_global(5);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
@@ -867,7 +878,9 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
             cell_pd = dof_handler_pd.begin_active(),
             cell_etf = dof_handler_etf.begin_active();
 
-    std::vector<double> errors_in_solution_gradient;
+    std::vector<Point<3>> errors_in_solution_gradient;
+    std::vector<double> errors_x;
+    std::vector<double> errors_y;
     for (; cell != endc; ++cell, ++cell_pd, ++cell_etf)
     {
         fe_values.reinit(cell);
@@ -945,6 +958,11 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                                                                       interior_dofs,
                                                                       solution_grad);
 
+                            auto point = fe_face_values_etf.get_quadrature_points()[0];
+                            Point<3> error(point(0), point(1), std::abs(solution_grad[0].norm() -
+                                                                        cos_pi_x_cos_pi_y.gradient(point, 0).norm()));
+                            errors_in_solution_gradient.push_back(error);
+
                         }
                         else {
                             // Get the value of the solution gradient at the neighbor center and
@@ -958,6 +976,10 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                             fe_values_center[pressure_interior].get_function_gradients(solution, neighbor_solution_grad);
 
                             solution_grad[0] = 0.5 * (solution_grad[0] + neighbor_solution_grad[0]);
+//                            auto point = fe_values_center.get_quadrature_points()[0];
+//                            Point<3> error(point(0), point(1), std::abs(solution_grad[0].norm() -
+//                                                                        cos_pi_x_cos_pi_y.gradient(point, 0).norm()));
+//                            errors_in_solution_gradient.push_back(error);
                         }
 
                         for (unsigned int q = 0; q < n_face_q_points; ++q) {
@@ -984,9 +1006,11 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                     fe_values_pd.get_function_values(cell_partial_deriv,
                                                      local_dof_indices_pd,
                                                      cell_partial_derivs[i][j]);
-                    fe_values_center.reinit(cell);
-                    auto ex = cos_pi_x_cos_pi_y.hessian(fe_values_center.get_quadrature_points()[0], 0);
-                    errors_in_solution_gradient.push_back(std::abs(ex[i][j] - cell_partial_deriv[0]));
+//                    fe_values_center.reinit(cell);
+//                    auto ex = x_2_y_2.hessian(fe_values_center.get_quadrature_points()[0], 0);
+//                    auto point = fe_values_center.get_quadrature_points()[0];
+//                    Point<3> error(point(0), point(1), std::abs(ex[i][j] - cell_partial_deriv[0]));
+//                    errors_in_solution_gradient.push_back(error);
                 }
 
             for (unsigned int q = 0; q < n_q_points; ++q) {
@@ -1028,7 +1052,10 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
         constraints.distribute_local_to_global(
                 cell_rhs, local_dof_indices, system_rhs);
     }
-    std::cout << "max error: " << *std::max_element(errors_in_solution_gradient.begin(), errors_in_solution_gradient.end()) << std::endl;
+    //std::cout << "max error: " << *std::max_element(errors_in_solution_gradient.begin(), errors_in_solution_gradient.end()) << std::endl;
+    std::ofstream output_file_z("./error_z.txt");
+    std::ostream_iterator<Point<3>> output_iterator(output_file_z, "\n");
+    std::copy(errors_in_solution_gradient.begin(), errors_in_solution_gradient.end(), output_iterator);
 }
 
 
@@ -1046,364 +1073,6 @@ void WGOptimalTransport<dim>::solve()
     constraints.distribute(solution);
 }
 
-
-// @sect4{WGOptimalTransport<dim>::compute_postprocessed_velocity}
-
-// In this function, compute the velocity field from the pressure
-// solution previously computed. The
-// velocity is defined as $\mathbf{u}_h = \mathbf{Q}_h \left(
-// -\mathbf{K}\nabla_{w,d}p_h \right)$, which requires us to compute
-// many of the same terms as in the assembly of the system matrix.
-// There are also the matrices $E^K,D^K$ we need to assemble (see
-// the introduction) but they really just follow the same kind of
-// pattern.
-//
-// Computing the same matrices here as we have already done in the
-// `assemble_system()` function is of course wasteful in terms of
-// CPU time. Likewise, we copy some of the code from there to this
-// function, and this is also generally a poor idea. A better
-// implementation might provide for a function that encapsulates
-// this duplicated code. One could also think of using the classic
-// trade-off between computing efficiency and memory efficiency to
-// only compute the $C^K$ matrices once per cell during the
-// assembly, storing them somewhere on the side, and re-using them
-// here. (This is what step-51 does, for example, where the
-// `assemble_system()` function takes an argument that determines
-// whether the local matrices are recomputed, and a similar approach
-// -- maybe with storing local matrices elsewhere -- could be
-// adapted for the current program.)
-template <int dim>
-void WGOptimalTransport<dim>::compute_postprocessed_velocity()
-{
-    darcy_velocity.reinit(dof_handler_dgrt.n_dofs());
-
-    const QGauss<dim>     quadrature_formula(fe_dgrt.degree + 1);
-    const QGauss<dim - 1> face_quadrature_formula(fe_dgrt.degree + 1);
-
-    FEValues<dim> fe_values(fe,
-                            quadrature_formula,
-                            update_values | update_quadrature_points |
-                            update_JxW_values);
-
-    FEFaceValues<dim> fe_face_values(fe,
-                                     face_quadrature_formula,
-                                     update_values | update_normal_vectors |
-                                     update_quadrature_points |
-                                     update_JxW_values);
-
-    FEValues<dim> fe_values_dgrt(fe_dgrt,
-                                 quadrature_formula,
-                                 update_values | update_gradients |
-                                 update_quadrature_points |
-                                 update_JxW_values);
-
-    FEFaceValues<dim> fe_face_values_dgrt(fe_dgrt,
-                                          face_quadrature_formula,
-                                          update_values |
-                                          update_normal_vectors |
-                                          update_quadrature_points |
-                                          update_JxW_values);
-
-    const unsigned int dofs_per_cell      = fe.dofs_per_cell;
-    const unsigned int dofs_per_cell_dgrt = fe_dgrt.dofs_per_cell;
-
-    const unsigned int n_q_points      = fe_values.get_quadrature().size();
-    const unsigned int n_q_points_dgrt = fe_values_dgrt.get_quadrature().size();
-
-    const unsigned int n_face_q_points = fe_face_values.get_quadrature().size();
-
-
-    std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-    std::vector<types::global_dof_index> local_dof_indices_dgrt(
-            dofs_per_cell_dgrt);
-
-    FullMatrix<double> cell_matrix_M(dofs_per_cell_dgrt, dofs_per_cell_dgrt);
-    FullMatrix<double> cell_matrix_G(dofs_per_cell_dgrt, dofs_per_cell);
-    FullMatrix<double> cell_matrix_C(dofs_per_cell, dofs_per_cell_dgrt);
-    FullMatrix<double> cell_matrix_D(dofs_per_cell_dgrt, dofs_per_cell_dgrt);
-    FullMatrix<double> cell_matrix_E(dofs_per_cell_dgrt, dofs_per_cell_dgrt);
-
-    Vector<double> cell_solution(dofs_per_cell);
-    Vector<double> cell_velocity(dofs_per_cell_dgrt);
-
-    const Coefficient<dim>      coefficient;
-    std::vector<Tensor<2, dim>> coefficient_values(n_q_points_dgrt);
-
-    const FEValuesExtractors::Vector velocities(0);
-    const FEValuesExtractors::Scalar pressure_interior(0);
-    const FEValuesExtractors::Scalar pressure_face(1);
-
-    // In the introduction, we explained how to calculate the numerical velocity
-    // on the cell. We need the pressure solution values on each cell,
-    // coefficients of the Gram matrix and coefficients of the $L_2$ projection.
-    // We have already calculated the global solution, so we will extract the
-    // cell solution from the global solution. The coefficients of the Gram
-    // matrix have been calculated when we assembled the system matrix for the
-    // pressures. We will do the same way here. For the coefficients of the
-    // projection, we do matrix multiplication, i.e., the inverse of the Gram
-    // matrix times the matrix with $(\mathbf{K} \mathbf{w}, \mathbf{w})$ as
-    // components. Then, we multiply all these coefficients and call them beta.
-    // The numerical velocity is the product of beta and the basis functions of
-    // the Raviart-Thomas space.
-    typename DoFHandler<dim>::active_cell_iterator
-            cell = dof_handler.begin_active(),
-            endc = dof_handler.end(), cell_dgrt = dof_handler_dgrt.begin_active();
-    for (; cell != endc; ++cell, ++cell_dgrt)
-    {
-        fe_values.reinit(cell);
-        fe_values_dgrt.reinit(cell_dgrt);
-
-        coefficient.value_list(fe_values_dgrt.get_quadrature_points(),
-                               coefficient_values);
-
-        // The component of this <code>cell_matrix_E</code> is the integral of
-        // $(\mathbf{K} \mathbf{w}, \mathbf{w})$. <code>cell_matrix_M</code> is
-        // the Gram matrix.
-        cell_matrix_M = 0;
-        cell_matrix_E = 0;
-        for (unsigned int q = 0; q < n_q_points_dgrt; ++q)
-            for (unsigned int i = 0; i < dofs_per_cell_dgrt; ++i)
-            {
-                const Tensor<1, dim> v_i = fe_values_dgrt[velocities].value(i, q);
-                for (unsigned int k = 0; k < dofs_per_cell_dgrt; ++k)
-                {
-                    const Tensor<1, dim> v_k =
-                            fe_values_dgrt[velocities].value(k, q);
-
-                    cell_matrix_E(i, k) +=
-                            (coefficient_values[q] * v_i * v_k * fe_values_dgrt.JxW(q));
-
-                    cell_matrix_M(i, k) += (v_i * v_k * fe_values_dgrt.JxW(q));
-                }
-            }
-
-        // To compute the matrix $D$ mentioned in the introduction, we
-        // then need to evaluate $D=M^{-1}E$ as explained in the
-        // introduction:
-        cell_matrix_M.gauss_jordan();
-        cell_matrix_M.mmult(cell_matrix_D, cell_matrix_E);
-
-        // Then we also need, again, to compute the matrix $C$ that is
-        // used to evaluate the weak discrete gradient. This is the
-        // exact same code as used in the assembly of the system
-        // matrix, so we just copy it from there:
-        cell_matrix_G = 0;
-        for (unsigned int q = 0; q < n_q_points; ++q)
-            for (unsigned int i = 0; i < dofs_per_cell_dgrt; ++i)
-            {
-                const double div_v_i =
-                        fe_values_dgrt[velocities].divergence(i, q);
-                for (unsigned int j = 0; j < dofs_per_cell; ++j)
-                {
-                    const double phi_j_interior =
-                            fe_values[pressure_interior].value(j, q);
-
-                    cell_matrix_G(i, j) -=
-                            (div_v_i * phi_j_interior * fe_values.JxW(q));
-                }
-            }
-
-        for (const auto &face : cell->face_iterators())
-        {
-            fe_face_values.reinit(cell, face);
-            fe_face_values_dgrt.reinit(cell_dgrt, face);
-
-            for (unsigned int q = 0; q < n_face_q_points; ++q)
-            {
-                const Tensor<1, dim> normal = fe_face_values.normal_vector(q);
-
-                for (unsigned int i = 0; i < dofs_per_cell_dgrt; ++i)
-                {
-                    const Tensor<1, dim> v_i =
-                            fe_face_values_dgrt[velocities].value(i, q);
-                    for (unsigned int j = 0; j < dofs_per_cell; ++j)
-                    {
-                        const double phi_j_face =
-                                fe_face_values[pressure_face].value(j, q);
-
-                        cell_matrix_G(i, j) +=
-                                ((v_i * normal) * phi_j_face * fe_face_values.JxW(q));
-                    }
-                }
-            }
-        }
-        cell_matrix_G.Tmmult(cell_matrix_C, cell_matrix_M);
-
-        // Finally, we need to extract the pressure unknowns that
-        // correspond to the current cell:
-        cell->get_dof_values(solution, cell_solution);
-
-        // We are now in a position to compute the local velocity
-        // unknowns (with respect to the Raviart-Thomas space we are
-        // projecting the term $-\mathbf K \nabla_{w,d} p_h$ into):
-        cell_velocity = 0;
-        for (unsigned int k = 0; k < dofs_per_cell_dgrt; ++k)
-            for (unsigned int j = 0; j < dofs_per_cell_dgrt; ++j)
-                for (unsigned int i = 0; i < dofs_per_cell; ++i)
-                    cell_velocity(k) +=
-                            -(cell_solution(i) * cell_matrix_C(i, j) * cell_matrix_D(k, j));
-
-        // We compute Darcy velocity.
-        // This is same as cell_velocity but used to graph Darcy velocity.
-        cell_dgrt->get_dof_indices(local_dof_indices_dgrt);
-        for (unsigned int k = 0; k < dofs_per_cell_dgrt; ++k)
-            for (unsigned int j = 0; j < dofs_per_cell_dgrt; ++j)
-                for (unsigned int i = 0; i < dofs_per_cell; ++i)
-                    darcy_velocity(local_dof_indices_dgrt[k]) +=
-                            -(cell_solution(i) * cell_matrix_C(i, j) * cell_matrix_D(k, j));
-    }
-}
-
-
-
-// @sect4{WGOptimalTransport<dim>::compute_pressure_error}
-
-// This part is to calculate the $L_2$ error of the pressure.  We
-// define a vector that holds the norm of the error on each cell.
-// Next, we use VectorTool::integrate_difference() to compute the
-// error in the $L_2$ norm on each cell. However, we really only
-// care about the error in the interior component of the solution
-// vector (we can't even evaluate the interface pressures at the
-// quadrature points because these are all located in the interior
-// of cells) and consequently have to use a weight function that
-// ensures that the interface component of the solution variable is
-// ignored. This is done by using the ComponentSelectFunction whose
-// arguments indicate which component we want to select (component
-// zero, i.e., the interior pressures) and how many components there
-// are in total (two).
-template <int dim>
-void WGOptimalTransport<dim>::compute_pressure_error()
-{
-    Vector<float> difference_per_cell(triangulation.n_active_cells());
-    const ComponentSelectFunction<dim> select_interior_pressure(0, 2);
-    VectorTools::integrate_difference(dof_handler,
-                                      solution,
-                                      ExactPressure<dim>(),
-                                      difference_per_cell,
-                                      QGauss<dim>(fe.degree + 2),
-                                      VectorTools::L2_norm,
-                                      &select_interior_pressure);
-
-    const double L2_error = difference_per_cell.l2_norm();
-    std::cout << "L2_error_pressure " << L2_error << std::endl;
-}
-
-
-
-// @sect4{WGOptimalTransport<dim>::compute_velocity_error}
-
-// In this function, we evaluate $L_2$ errors for the velocity on
-// each cell, and $L_2$ errors for the flux on faces. The function
-// relies on the `compute_postprocessed_velocity()` function having
-// previous computed, which computes the velocity field based on the
-// pressure solution that has previously been computed.
-//
-// We are going to evaluate velocities on each cell and calculate
-// the difference between numerical and exact velocities.
-template <int dim>
-void WGOptimalTransport<dim>::compute_velocity_errors()
-{
-    const QGauss<dim>     quadrature_formula(fe_dgrt.degree + 1);
-    const QGauss<dim - 1> face_quadrature_formula(fe_dgrt.degree + 1);
-
-    FEValues<dim> fe_values_dgrt(fe_dgrt,
-                                 quadrature_formula,
-                                 update_values | update_gradients |
-                                 update_quadrature_points |
-                                 update_JxW_values);
-
-    FEFaceValues<dim> fe_face_values_dgrt(fe_dgrt,
-                                          face_quadrature_formula,
-                                          update_values |
-                                          update_normal_vectors |
-                                          update_quadrature_points |
-                                          update_JxW_values);
-
-    const unsigned int n_q_points_dgrt = fe_values_dgrt.get_quadrature().size();
-    const unsigned int n_face_q_points_dgrt =
-            fe_face_values_dgrt.get_quadrature().size();
-
-    std::vector<Tensor<1, dim>> velocity_values(n_q_points_dgrt);
-    std::vector<Tensor<1, dim>> velocity_face_values(n_face_q_points_dgrt);
-
-    const FEValuesExtractors::Vector velocities(0);
-
-    const ExactVelocity<dim> exact_velocity;
-
-    double L2_err_velocity_cell_sqr_global = 0;
-    double L2_err_flux_sqr                 = 0;
-
-    // Having previously computed the postprocessed velocity, we here
-    // only have to extract the corresponding values on each cell and
-    // face and compare it to the exact values.
-    for (const auto &cell_dgrt : dof_handler_dgrt.active_cell_iterators())
-    {
-        fe_values_dgrt.reinit(cell_dgrt);
-
-        // First compute the $L_2$ error between the postprocessed velocity
-        // field and the exact one:
-        fe_values_dgrt[velocities].get_function_values(darcy_velocity,
-                                                       velocity_values);
-        double L2_err_velocity_cell_sqr_local = 0;
-        for (unsigned int q = 0; q < n_q_points_dgrt; ++q)
-        {
-            const Tensor<1, dim> velocity = velocity_values[q];
-            const Tensor<1, dim> true_velocity =
-                    exact_velocity.value(fe_values_dgrt.quadrature_point(q));
-
-            L2_err_velocity_cell_sqr_local +=
-                    ((velocity - true_velocity) * (velocity - true_velocity) *
-                     fe_values_dgrt.JxW(q));
-        }
-        L2_err_velocity_cell_sqr_global += L2_err_velocity_cell_sqr_local;
-
-        // For reconstructing the flux we need the size of cells and
-        // faces. Since fluxes are calculated on faces, we have the
-        // loop over all four faces of each cell. To calculate the
-        // face velocity, we extract values at the quadrature points from the
-        // `darcy_velocity` which we have computed previously. Then, we
-        // calculate the squared velocity error in normal direction. Finally, we
-        // calculate the $L_2$ flux error on the cell by appropriately scaling
-        // with face and cell areas and add it to the global error.
-        const double cell_area = cell_dgrt->measure();
-        for (const auto &face_dgrt : cell_dgrt->face_iterators())
-        {
-            const double face_length = face_dgrt->measure();
-            fe_face_values_dgrt.reinit(cell_dgrt, face_dgrt);
-            fe_face_values_dgrt[velocities].get_function_values(
-                    darcy_velocity, velocity_face_values);
-
-            double L2_err_flux_face_sqr_local = 0;
-            for (unsigned int q = 0; q < n_face_q_points_dgrt; ++q)
-            {
-                const Tensor<1, dim> velocity = velocity_face_values[q];
-                const Tensor<1, dim> true_velocity =
-                        exact_velocity.value(fe_face_values_dgrt.quadrature_point(q));
-
-                const Tensor<1, dim> normal =
-                        fe_face_values_dgrt.normal_vector(q);
-
-                L2_err_flux_face_sqr_local +=
-                        ((velocity * normal - true_velocity * normal) *
-                         (velocity * normal - true_velocity * normal) *
-                         fe_face_values_dgrt.JxW(q));
-            }
-            const double err_flux_each_face =
-                    L2_err_flux_face_sqr_local / face_length * cell_area;
-            L2_err_flux_sqr += err_flux_each_face;
-        }
-    }
-
-    // After adding up errors over all cells and faces, we take the
-    // square root and get the $L_2$ errors of velocity and
-    // flux. These we output to screen.
-    const double L2_err_velocity_cell =
-            std::sqrt(L2_err_velocity_cell_sqr_global);
-    const double L2_err_flux_face = std::sqrt(L2_err_flux_sqr);
-
-    std::cout << "L2_error_vel:  " << L2_err_velocity_cell << std::endl
-              << "L2_error_flux: " << L2_err_flux_face << std::endl;
-}
 
 
 // @sect4{WGOptimalTransport::output_results}
