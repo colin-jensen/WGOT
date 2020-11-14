@@ -244,6 +244,8 @@ public:
                          const unsigned int component) const override;
     virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
                          const unsigned int component) const override;
+    virtual Tensor<1, dim> gradient(const Point<dim> & p,
+                                    const unsigned int component) const override;
 };
 
 
@@ -253,6 +255,17 @@ double Sin_pi_x_Sin_pi_y<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
     return std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
+}
+
+template <int dim>
+Tensor<1, dim> Sin_pi_x_Sin_pi_y<dim>::gradient(const Point<dim> & p,
+                        const unsigned int /*component*/) const
+{
+    Tensor<1, dim> grad;
+    grad[0] = numbers::PI * std::cos(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
+    grad[1] = numbers::PI * std::cos(numbers::PI * p[1]) * std::sin(numbers::PI * p[0]);
+
+    return grad;
 }
 
 template <int dim>
@@ -283,6 +296,8 @@ public:
                          const unsigned int component) const override;
     virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
                                               const unsigned int component) const override;
+    virtual Tensor<1, dim> gradient(const Point<dim> & p,
+                                              const unsigned int component) const override;
 };
 
 
@@ -292,6 +307,17 @@ double X_2_Y_2<dim>::value(const Point<dim> &p,
                                      const unsigned int /*component*/) const
 {
     return p[0] * p[0] * p[1] * p[1];
+}
+
+template <int dim>
+Tensor<1, dim> X_2_Y_2<dim>::gradient(const Point<dim> & p,
+                                const unsigned int /*component*/) const
+{
+    Tensor<1, dim> grad;
+    grad[0] = 2 * p[0] * p[1] * p[1];
+    grad[1] = 2 * p[1] * p[0] * p[0];
+
+    return grad;
 }
 
 template <int dim>
@@ -440,7 +466,7 @@ template <int dim>
 void WGOptimalTransport<dim>::make_grid()
 {
     GridGenerator::hyper_cube(triangulation, 0, 1);
-    triangulation.refine_global(5);
+    triangulation.refine_global(1);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -824,7 +850,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                                         update_JxW_values);
 
     FEFaceValues<dim> fe_face_values_etf(fe_etf,
-                                         quadrature_face_midpoint,
+                                         face_quadrature_formula,
                                          update_values | update_gradients |
                                          update_quadrature_points);
 
@@ -938,58 +964,63 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                         }
 
                         // Approximate a value for the gradient of the solution on the face.
-                        std::vector<Tensor<1, dim>> solution_grad(quadrature_cell_center.size());
+                        std::vector<Tensor<1, dim>> solution_grad(n_face_q_points);
 
-                        if (face->at_boundary()) {
-                            // Get value of the interior solution gradient at the face midpoint
-                            fe_face_values_etf.reinit(cell_etf, cell_etf->face(f));
 
-                            cell->get_dof_indices(local_dof_indices);
-                            std::vector<types::global_cell_index> interior_dofs;
+                        // Get value of the interior solution gradient at the face midpoint
+                        fe_face_values_etf.reinit(cell_etf, cell_etf->face(f));
+                        auto points = fe_face_values_etf.get_quadrature_points();
 
-                            // Filter out the dofs pertaining to the interior component of the FESystem
-                            for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-                                auto index_pair = fe.system_to_component_index(i);
-                                if (index_pair.first == 0) {
-                                    interior_dofs.push_back(local_dof_indices[i]);
-                                }
+                        cell->get_dof_indices(local_dof_indices);
+                        std::vector<types::global_cell_index> interior_dofs;
+
+                        // Filter out the dofs pertaining to the interior component of the FESystem
+                        for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+                            auto index_pair = fe.system_to_component_index(i);
+                            if (index_pair.first == 0) {
+                                interior_dofs.push_back(local_dof_indices[i]);
                             }
-                            fe_face_values_etf.get_function_gradients(solution,
-                                                                      interior_dofs,
-                                                                      solution_grad);
-
-                            auto point = fe_face_values_etf.get_quadrature_points()[0];
-                            Point<3> error(point(0), point(1), std::abs(solution_grad[0].norm() -
-                                                                        cos_pi_x_cos_pi_y.gradient(point, 0).norm()));
-                            errors_in_solution_gradient.push_back(error);
-
                         }
-                        else {
-                            // Get the value of the solution gradient at the neighbor center and
-                            // average with the solution gradient at the current cell center.
-                            fe_values_center.reinit(cell);
-                            fe_values_center[pressure_interior].get_function_gradients(solution, solution_grad);
+                        fe_face_values_etf.get_function_gradients(solution,
+                                                                  interior_dofs,
+                                                                  solution_grad);
 
-                            const auto neighbor = cell->neighbor(f);
-                            std::vector<Tensor<1, dim>> neighbor_solution_grad(quadrature_cell_center.size());
-                            fe_values_center.reinit(neighbor);
-                            fe_values_center[pressure_interior].get_function_gradients(solution, neighbor_solution_grad);
+//                        if (!face->at_boundary()) {
+//                            const auto neighbor = cell_etf->neighbor(f);
+//                            fe_face_values_etf.reinit(neighbor, cell_etf->face(f));
+//                            std::vector<Tensor<1, dim>> neighbor_solution_grad(n_face_q_points);
+//                            fe_face_values_etf.get_function_gradients(solution,
+//                                                                      interior_dofs,
+//                                                                      neighbor_solution_grad);
+//
+//                            for (unsigned int q = 0; q < n_face_q_points; ++q) {
+//                                solution_grad[q] = 0.5 * (solution_grad[q] + neighbor_solution_grad[q]);
+//                            }
+//                        }
 
-                            solution_grad[0] = 0.5 * (solution_grad[0] + neighbor_solution_grad[0]);
-//                            auto point = fe_values_center.get_quadrature_points()[0];
-//                            Point<3> error(point(0), point(1), std::abs(solution_grad[0].norm() -
-//                                                                        cos_pi_x_cos_pi_y.gradient(point, 0).norm()));
+//                        for (unsigned int q = 0; q < n_face_q_points; ++q) {
+//                            Point<3> error(points[q](0), points[q](1), std::abs(solution_grad[q].norm() -
+//                                                                       sin_pi_x_sin_pi_y.gradient(points[q], 0).norm()));
 //                            errors_in_solution_gradient.push_back(error);
-                        }
+//                        }
 
+
+
+                        std::cout << "G before: " << std::endl;
+                        cell_vector_G.print(std::cout);
                         for (unsigned int q = 0; q < n_face_q_points; ++q) {
                             const Tensor<1, dim> normal = fe_face_values_pd.normal_vector(q);
 
                             for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
-                                cell_vector_G(k) += solution_grad[0][i] *
+                                cell_vector_G(k) += solution_grad[q][i] *
                                                     normal[j] *
                                                     fe_face_values_pd.shape_value(k, q) *
                                                     fe_face_values_pd.JxW(q);
+                                std::cout << "grad :" << solution_grad[q][i] << std::endl;
+                                std::cout << "normal: " << normal[j] << std::endl;
+                                std::cout << "G after: " << std::endl;
+                                cell_vector_G.print(std::cout);
+                                std::cout << std::endl;
                             }
                         }
 
@@ -1006,11 +1037,14 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                     fe_values_pd.get_function_values(cell_partial_deriv,
                                                      local_dof_indices_pd,
                                                      cell_partial_derivs[i][j]);
-//                    fe_values_center.reinit(cell);
-//                    auto ex = x_2_y_2.hessian(fe_values_center.get_quadrature_points()[0], 0);
-//                    auto point = fe_values_center.get_quadrature_points()[0];
-//                    Point<3> error(point(0), point(1), std::abs(ex[i][j] - cell_partial_deriv[0]));
-//                    errors_in_solution_gradient.push_back(error);
+
+
+                    auto points = fe_values_pd.get_quadrature_points();
+                    for (unsigned int q = 0; q < n_q_points; ++q) {
+                        Point<3> error(points[q](0), points[q](1), std::abs(cell_partial_derivs[i][j][0] -
+                                                                   sin_pi_x_sin_pi_y.hessian(points[q], 0)[i][j]));
+                        errors_in_solution_gradient.push_back(error);
+                    }
                 }
 
             for (unsigned int q = 0; q < n_q_points; ++q) {
@@ -1155,7 +1189,7 @@ void WGOptimalTransport<dim>::run()
     Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
     Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
     X_2_Y_2<dim> x_2_y_2;
-    VectorTools::interpolate(dof_handler, cos_pi_x_cos_pi_y, solution);
+    VectorTools::interpolate(dof_handler, sin_pi_x_sin_pi_y, solution);
     //solve();
     assemble_system_rhs(0);
     //compute_postprocessed_velocity();
