@@ -8,7 +8,7 @@ int main()
 {
     try
     {
-        WGOptimalTransport<2> wgot(1);
+        WGOptimalTransport<2> wgot(2);
         wgot.run();
     }
     catch (std::exception &exc)

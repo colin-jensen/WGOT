@@ -186,7 +186,7 @@ class Cos_pi_x_Cos_pi_y : public Function<dim>
 {
 public:
     Cos_pi_x_Cos_pi_y()
-            : Function<dim>(1)
+            : Function<dim>(2)
     {}
 
     virtual double value(const Point<dim> & p,
@@ -238,7 +238,7 @@ class Sin_pi_x_Sin_pi_y : public Function<dim>
 {
 public:
     Sin_pi_x_Sin_pi_y()
-            : Function<dim>(1)
+            : Function<dim>(2)
     {}
 
     virtual double value(const Point<dim> & p,
@@ -290,7 +290,7 @@ class X_2_Y_2 : public Function<dim>
 {
 public:
     X_2_Y_2()
-            : Function<dim>(1)
+            : Function<dim>(2)
     {}
 
     virtual double value(const Point<dim> & p,
@@ -320,115 +320,6 @@ SymmetricTensor<dim, dim> X_2_Y_2<dim>::hessian(const Point<dim> &p,
     return return_value;
 }
 
-template <int dim>
-class Bump : public Function<dim>
-{
-public:
-    Bump()
-            : Function<dim>(2)
-    {}
-
-    virtual double value(const Point<dim> & p,
-                         const unsigned int component) const override;
-    virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
-                                              const unsigned int component) const override;
-};
-
-
-
-template <int dim>
-double Bump<dim>::value(const Point<dim> &p,
-                           const unsigned int /*component*/) const
-{
-    return std::exp(-1 / (1 - p[0] * p[0] - p[1] - p[1] ));
-}
-
-template <int dim>
-SymmetricTensor<dim, dim> Bump<dim>::hessian(const Point<dim> &p,
-                                                const unsigned int /*component*/) const
-{
-    SymmetricTensor<dim, dim> return_value;
-    return_value[0][0] = 2*p[1]*p[1];
-    return_value[0][1] = 4*p[0]*p[0];
-    return_value[1][0] = 4*p[0]*p[0];
-    return_value[1][1] = 2*p[1]*p[1];
-    return return_value;
-}
-
-
-
-template <int dim>
-class ExactVelocity : public TensorFunction<1, dim>
-{
-public:
-    ExactVelocity()
-            : TensorFunction<1, dim>()
-    {}
-
-    virtual Tensor<1, dim> value(const Point<dim> &p) const override;
-};
-
-
-
-template <int dim>
-Tensor<1, dim> ExactVelocity<dim>::value(const Point<dim> &p) const
-{
-    Tensor<1, dim> return_value;
-    return_value[0] = -numbers::PI * std::sin(numbers::PI * p[0]) *
-                      std::cos(numbers::PI * p[1]);
-    return_value[1] = -numbers::PI * std::cos(numbers::PI * p[0]) *
-                      std::sin(numbers::PI * p[1]);
-    return return_value;
-}
-
-template <int dim>
-class ExactHessian : public TensorFunction<dim, dim>
-{
-public:
-    ExactHessian()
-            : TensorFunction<dim, dim>()
-    {}
-
-    virtual Tensor<dim, dim> value(const Point<dim> &p) const override;
-};
-
-
-
-template <int dim>
-Tensor<dim, dim> ExactHessian<dim>::value(const Point<dim> &p) const
-{
-    Tensor<dim, dim> return_value;
-    return_value[0][0] = -numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
-                          std::cos(numbers::PI * p[1]);
-    return_value[0][1] = numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
-                         std::sin(numbers::PI * p[1]);
-    return_value[1][0] = numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
-                         std::sin(numbers::PI * p[1]);
-    return_value[1][1] = -numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
-                         std::cos(numbers::PI * p[1]);
-    return return_value;
-}
-
-template<int dim>
-class ExactHessianDet : public Function<dim>
-{
-public:
-    ExactHessianDet() : Function<dim>(2) {}
-
-    virtual double value(const Point<dim> &p, const unsigned int component) const override;
-
-};
-
-template<int dim>
-double ExactHessianDet<dim>::value(const Point<dim> &p, const unsigned int /*component*/) const
-{
-    return std::pow(numbers::PI, 4) * (std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[0]) *
-                                       std::cos(numbers::PI * p[1]) * std::cos(numbers::PI * p[1]) -
-                                       std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[0]) *
-                                       std::sin(numbers::PI * p[1]) * std::sin(numbers::PI * p[1]));
-}
-
-
 
 // @sect3{WGOptimalTransport class implementation}
 
@@ -439,7 +330,7 @@ double ExactHessianDet<dim>::value(const Point<dim> &p, const unsigned int /*com
 // interface pressures, $p^\circ$ and $p^\partial$.
 template <int dim>
 WGOptimalTransport<dim>::WGOptimalTransport(const unsigned int degree)
-        : fe(FE_DGQ<dim>(degree), 1, FE_FaceQ<dim>(degree), 1)
+        : fe(FE_DGQ<dim>(degree), 1, FE_FaceQ<dim>(degree - 1), 1)
         , dof_handler(triangulation)
         , fe_dgrt(degree)
         , dof_handler_dgrt(triangulation)
@@ -482,8 +373,8 @@ void WGOptimalTransport<dim>::setup_system()
     dof_handler.distribute_dofs(fe);
     dof_handler_dgrt.distribute_dofs(fe_dgrt);
 
-    std::cout << "   Number of pressure degrees of freedom: "
-              << dof_handler.n_dofs() << std::endl;
+    std::cout << "   Number of pressure degrees of freedom per cell: "
+              << fe.dofs_per_cell << std::endl;
 
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
@@ -865,7 +756,6 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                                                                          std::vector<double>(n_q_points)));
     std::vector<double> cell_det_hessian(n_q_points);
 
-    ExactHessianDet<dim> exact_hessian_det;
     std::vector<double> exact_hessian_det_values(n_q_points);
 
 
@@ -899,156 +789,6 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
     {
         fe_values.reinit(cell);
         fe_values_pd.reinit(cell_pd);
-
-        if (!solution.all_zero()) {
-
-            for (unsigned int i = 0; i < dim; ++i)
-                for (unsigned int j = 0; j < dim; ++j) {
-
-                    cell_matrix_M = 0;
-                    cell_partial_deriv = 0;
-                    cell_vector_G = 0;
-
-                    // Compute the value of the solution on the interior
-                    std::vector<double> solution_interior(n_q_points);
-                    fe_values[pressure_interior].get_function_values(solution, solution_interior);
-
-                    for (unsigned int q = 0; q < n_q_points; ++q) {
-                        for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
-                            // Add the interior part of the discrete weak 2nd-order partial derivative.
-                            cell_vector_G(k) += solution_interior[q] *
-                                                fe_values_pd.shape_hessian(k, q)[j][i] *
-                                                fe_values_pd.JxW(q);
-
-                            // Compute the mass matrix m
-                            for (unsigned int m = 0; m < dofs_per_cell_pd; ++m) {
-                                cell_matrix_M(k, m) += fe_values_pd.shape_value(k, q) *
-                                                       fe_values_pd.shape_value(m, q) *
-                                                       fe_values_pd.JxW(q);
-                            }
-                        }
-                    }
-
-                    for (unsigned int f=0; f < GeometryInfo<dim>::faces_per_cell; ++f) {
-
-                        const auto face = cell->face(f);
-                        fe_face_values.reinit(cell, face);
-                        fe_face_values_pd.reinit(cell_pd, face);
-
-                        // Compute the value of the solution on the current face
-                        std::vector<double> solution_face(n_face_q_points);
-                        fe_face_values[pressure_face].get_function_values(solution, solution_face);
-
-                        for (unsigned int q = 0; q < n_face_q_points; ++q) {
-                            const Tensor<1, dim> normal = fe_face_values_pd.normal_vector(q);
-
-                            // Add the face part of the discrete weak 2nd-order partial derivative.
-                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
-                                cell_vector_G(k) -= solution_face[q] *
-                                                    normal[i] *
-                                                    fe_face_values_pd.shape_grad(k, q)[j] *
-                                                    fe_face_values_pd.JxW(q);
-                            }
-                        }
-
-                        // Approximate a value for the gradient of the solution on the face.
-                        std::vector<Tensor<1, dim>> solution_grad(quadrature_cell_center.size());
-
-                        if (face->at_boundary()) {
-                            // Get value of the interior solution gradient at the face midpoint
-                            fe_face_values_etf.reinit(cell_etf, cell_etf->face(f));
-
-                            cell->get_dof_indices(local_dof_indices);
-                            std::vector<types::global_cell_index> interior_dofs;
-
-                            // Filter out the dofs pertaining to the interior component of the FESystem
-                            for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-                                auto index_pair = fe.system_to_component_index(i);
-                                if (index_pair.first == 0) {
-                                    interior_dofs.push_back(local_dof_indices[i]);
-                                }
-                            }
-                            fe_face_values_etf.get_function_gradients(solution,
-                                                                      interior_dofs,
-                                                                      solution_grad);
-
-//                            auto point = fe_face_values_etf.get_quadrature_points()[0];
-//                            Point<3> error(point(0), point(1), std::abs(solution_grad[0].norm() -
-//                                                                        cos_pi_x_cos_pi_y.gradient(point, 0).norm()));
-//                            errors_in_solution_gradient.push_back(error);
-
-                        }
-                        else {
-                            // Get the value of the solution gradient at the neighbor center and
-                            // average with the solution gradient at the current cell center.
-                            fe_values_center.reinit(cell);
-                            fe_values_center[pressure_interior].get_function_gradients(solution, solution_grad);
-
-                            const auto neighbor = cell->neighbor(f);
-                            std::vector<Tensor<1, dim>> neighbor_solution_grad(quadrature_cell_center.size());
-                            fe_values_center.reinit(neighbor);
-                            fe_values_center[pressure_interior].get_function_gradients(solution, neighbor_solution_grad);
-
-                            solution_grad[0] = 0.5 * (solution_grad[0] + neighbor_solution_grad[0]);
-//                            auto point = fe_values_center.get_quadrature_points()[0];
-//                            Point<3> error(point(0), point(1), std::abs(solution_grad[0].norm() -
-//                                                                        cos_pi_x_cos_pi_y.gradient(point, 0).norm()));
-//                            errors_in_solution_gradient.push_back(error);
-                        }
-
-                        for (unsigned int q = 0; q < n_face_q_points; ++q) {
-                            const Tensor<1, dim> normal = fe_face_values_pd.normal_vector(q);
-
-                            for (unsigned int k = 0; k < dofs_per_cell_pd; ++k) {
-                                cell_vector_G(k) += solution_grad[0][i] *
-                                                    normal[j] *
-                                                    fe_face_values_pd.shape_value(k, q) *
-                                                    fe_face_values_pd.JxW(q);
-                            }
-                        }
-
-                    }
-
-                    // Solve for the coefficients of the discrete weak 2nd-order partial derivative on this cell
-                    cell_matrix_M.gauss_jordan();
-
-                    cell_matrix_M.vmult(cell_partial_deriv, cell_vector_G);
-
-                    // Get the value of the discrete weak 2nd-order partial derivative at each quad point in this cell
-                    std::vector<types::global_dof_index> local_dof_indices_pd = {0};
-                    //cell_pd->get_dof_indices(local_dof_indices_pd);
-                    fe_values_pd.get_function_values(cell_partial_deriv,
-                                                     local_dof_indices_pd,
-                                                     cell_partial_derivs[i][j]);
-//                    fe_values_center.reinit(cell);
-//                    auto ex = sin_pi_x_sin_pi_y.hessian(fe_values_center.get_quadrature_points()[0], 0);
-//                    auto point = fe_values_center.get_quadrature_points()[0];
-//                    Point<3> error(point(0), point(1), std::abs(ex[i][j] - cell_partial_deriv[0]));
-//                    errors_in_solution_gradient.push_back(error);
-                }
-
-            for (unsigned int q = 0; q < n_q_points; ++q) {
-
-                // Assemble the hessian matrix for this quadrature point
-                FullMatrix<double> hessian(dim, dim);
-                for (unsigned int i = 0; i < dim; ++i)
-                    for (unsigned int j = 0; j < dim; ++j) {
-                        hessian(i, j) = cell_partial_derivs[i][j][q];
-                    }
-
-                // Compute the hessian determinant at this quadrature point
-                cell_det_hessian[q] = hessian.determinant();
-            }
-
-            exact_hessian_det.value_list(fe_values_pd.get_quadrature_points(), exact_hessian_det_values);
-
-            double error = 0;
-            for (unsigned int q = 0; q < n_q_points; ++q) {
-                error += std::abs(exact_hessian_det_values[q] - cell_det_hessian[q]);
-            }
-//            std::cout << "error: " << error << std::endl;
-
-        }
 
         right_hand_side.value_list(fe_values.get_quadrature_points(),
                                    right_hand_side_values);
@@ -1165,7 +905,7 @@ void WGOptimalTransport<dim>::compute_hessian()
 
     // A finite element to handle the values of the function we are taking the
     // discrete weak 2nd order partial derivative of
-    FE_Q<dim> fe_f(1);
+    FE_DGQ<dim> fe_f(fe.degree);
     DoFHandler<dim> dof_handler_f(triangulation);
     dof_handler_f.distribute_dofs(fe_f);
 
@@ -1196,7 +936,7 @@ void WGOptimalTransport<dim>::compute_hessian()
     // For accessing the values of the function to be differentiated on the cell interior
     FEValues<dim> fe_values_f(fe_f,
                               quadrature_formula,
-                              update_values | update_gradients | update_hessians |
+                              update_values | update_gradients |
                               update_quadrature_points);
 
     // For accessing the values of the function to be differentiated on the cell faces
@@ -1214,13 +954,9 @@ void WGOptimalTransport<dim>::compute_hessian()
     Vector<double> cell_vector_G(dofs_per_cell_h);
     Vector<double> cell_dw2pd_coeffs(dofs_per_cell_h);
 
-    // Example functions
     Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
     Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
     X_2_Y_2<dim> x_2_y_2;
-
-    Vector<double> function_coeffs(dof_handler_f.n_dofs());
-    VectorTools::interpolate(dof_handler_f, cos_pi_x_cos_pi_y, function_coeffs);
 
     std::vector<Point<3>> errors;
 
@@ -1230,14 +966,42 @@ void WGOptimalTransport<dim>::compute_hessian()
 
     // Setup cell iterators
     typename DoFHandler<dim>::active_cell_iterator
+        cell   = dof_handler.begin_active(),
         cell_f = dof_handler_f.begin_active(),
         cell_h = dof_handler_h.begin_active(),
         endc   = dof_handler_f.end();
 
-    for (; cell_f != endc; ++cell_f, ++cell_h) {
+    for (; cell_f != endc; ++cell, ++cell_f, ++cell_h) {
 
         fe_values_f.reinit(cell_f);
         fe_values_h.reinit(cell_h);
+
+        // Ensure correct interpolation
+        std::vector<types::global_dof_index> local_dof_indices(fe.dofs_per_cell);
+        std::vector<types::global_dof_index> interior_dof_indices;
+
+        cell->get_dof_indices(local_dof_indices);
+
+        // Filter out the dofs pertaining to the interior component of the FESystem
+        for (unsigned int i = 0; i < fe.dofs_per_cell; ++i) {
+            auto index_pair = fe.system_to_component_index(i);
+            if (index_pair.first == 0) {
+                interior_dof_indices.push_back(local_dof_indices[i]);
+            }
+        }
+
+        // Record error in the interpolation
+//        std::vector<double> function_vals(n_quad_points);
+//        fe_values_f.get_function_values(solution, interior_dof_indices, function_vals);
+//
+//        const auto points = fe_values_f.get_quadrature_points();
+//        for (unsigned int q = 0; q < n_quad_points; ++q) {
+//            Point<3> error(points[q](0),
+//                           points[q](1),
+//                           std::abs(function_vals[q] - sin_pi_x_sin_pi_y.value(points[q], 0)));
+//            std::cout << function_vals[q] << " : " << sin_pi_x_sin_pi_y.value(points[q], 0) << " : " << error << std::endl;
+//            errors.push_back(error);
+//        }
 
         // TODO: Build mass matrix
         cell_matrix_M = 0;
@@ -1269,22 +1033,24 @@ void WGOptimalTransport<dim>::compute_hessian()
 
 
                     // TODO: Incorporate face gradient part of G
+
                     std::vector<Tensor<1, dim>> function_gradients(n_quad_points_face);
-                    fe_values_f_face.get_function_gradients(function_coeffs, function_gradients);
+                    fe_values_f_face.get_function_gradients(solution, interior_dof_indices, function_gradients);
 
-                    if (cell_f->at_boundary(f) == false) {
-                        const auto neighbor = cell_f->neighbor(f);
-                        fe_values_f_face.reinit(neighbor, cell_f->face(f));
-                        std::vector<Tensor<1, dim>> neighbor_function_gradients(n_quad_points_face);
-                        fe_values_f_face.get_function_gradients(function_coeffs, neighbor_function_gradients);
-
-                        for (unsigned q = 0; q < n_quad_points_face; ++q) {
-                            function_gradients[q] = 0.5 * (function_gradients[q] + neighbor_function_gradients[q]);
-                        }
-                    }
+                    // Take average of gradient at the neighboring cell
+//                    if (cell_f->at_boundary(f) == false) {
+//                        const auto neighbor = cell_f->neighbor(f);
+//                        fe_values_f_face.reinit(neighbor, cell_f->face(f));
+//                        std::vector<Tensor<1, dim>> neighbor_function_gradients(n_quad_points_face);
+//                        fe_values_f_face.get_function_gradients(function_coeffs, neighbor_function_gradients);
+//
+//                        for (unsigned q = 0; q < n_quad_points_face; ++q) {
+//                            function_gradients[q] = 0.5 * (function_gradients[q] + neighbor_function_gradients[q]);
+//                        }
+//                    }
 
                     // Record error in function gradient
-//                    const auto points = fe_values_h_face.get_quadrature_points();
+//                    const auto points = fe_values_f_face.get_quadrature_points();
 //                    for (unsigned int q = 0; q < n_quad_points_face; ++q) {
 //                        Point<3> error(points[q](0), points[q](1),
 //                                       std::abs(function_gradients[q][0]- sin_pi_x_sin_pi_y.gradient(points[q], 0)[0]));
@@ -1304,27 +1070,22 @@ void WGOptimalTransport<dim>::compute_hessian()
                                                 fe_values_h_face.JxW(q);
                         }
                     }
-
-                    // TODO: Check myself before I wreck myself
                 }
 
                 // TODO: Compute cell_dw2pd
 
                 cell_matrix_M.vmult(cell_dw2pd_coeffs, cell_vector_G);
                 std::vector<double> cell_dw2pds(n_quad_points);
-                std::vector<types::global_dof_index> local_dof_indices = {0};
-                fe_values_h.get_function_values(cell_dw2pd_coeffs, local_dof_indices, cell_dw2pds);
+                std::vector<types::global_dof_index> dof_indices_h = {0};
+                fe_values_h.get_function_values(cell_dw2pd_coeffs, dof_indices_h, cell_dw2pds);
 
                 // Record error in function hessian
                 const auto points = fe_values_h.get_quadrature_points();
-                if (d1 == d1) {
-                    for (unsigned int q = 0; q < n_quad_points; ++q) {
-                        Point<3> error(points[q](0), points[q](1),
-                                       std::abs(cell_dw2pds[q] - cos_pi_x_cos_pi_y.hessian(points[q], 0)[d1][d2]));
-                        errors.push_back(error);
-                    }
+                for (unsigned int q = 0; q < n_quad_points; ++q) {
+                    Point<3> error(points[q](0), points[q](1),
+                                   std::abs(cell_dw2pds[q] - cos_pi_x_cos_pi_y.hessian(points[q], 0)[d1][d2]));
+                    errors.push_back(error);
                 }
-
             }
         }
     }
@@ -1347,6 +1108,11 @@ void WGOptimalTransport<dim>::run()
     setup_system();
     //assemble_system_matrix();
     //assemble_system_rhs(0);
+    // Example functions
+    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
+    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
+    X_2_Y_2<dim> x_2_y_2;
+    VectorTools::interpolate(dof_handler, cos_pi_x_cos_pi_y, solution);
     compute_hessian();
     //solve();
     //assemble_system_rhs(0);
