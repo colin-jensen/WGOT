@@ -314,9 +314,9 @@ SymmetricTensor<dim, dim> X_2_Y_2<dim>::hessian(const Point<dim> &p,
 {
     SymmetricTensor<dim, dim> return_value;
     return_value[0][0] = 2*p[1]*p[1];
-    return_value[0][1] = 4*p[0]*p[0];
-    return_value[1][0] = 4*p[0]*p[0];
-    return_value[1][1] = 2*p[1]*p[1];
+    return_value[0][1] = 4*p[0]*p[1];
+    return_value[1][0] = 4*p[0]*p[1];
+    return_value[1][1] = 2*p[0]*p[0];
     return return_value;
 }
 
@@ -1165,7 +1165,7 @@ void WGOptimalTransport<dim>::compute_hessian()
 
     // A finite element to handle the values of the function we are taking the
     // discrete weak 2nd order partial derivative of
-    FE_DGQ<dim> fe_f(fe.degree);
+    FE_Q<dim> fe_f(1);
     DoFHandler<dim> dof_handler_f(triangulation);
     dof_handler_f.distribute_dofs(fe_f);
 
@@ -1173,6 +1173,8 @@ void WGOptimalTransport<dim>::compute_hessian()
     Point<dim - 1> face_midpoint(0.5);
     Quadrature<dim> quadrature_formula(cell_center);
     Quadrature<dim - 1> quadrature_formula_face(face_midpoint);
+//    QGauss<dim> quadrature_formula(2);
+//    QGauss<dim - 1> quadrature_formula_face(2);
 
     // For accessing the values of the DW2PD basis functions on cell interiors
     FEValues<dim> fe_values_h(fe_h,
@@ -1194,7 +1196,7 @@ void WGOptimalTransport<dim>::compute_hessian()
     // For accessing the values of the function to be differentiated on the cell interior
     FEValues<dim> fe_values_f(fe_f,
                               quadrature_formula,
-                              update_values | update_gradients |
+                              update_values | update_gradients | update_hessians |
                               update_quadrature_points);
 
     // For accessing the values of the function to be differentiated on the cell faces
@@ -1218,29 +1220,13 @@ void WGOptimalTransport<dim>::compute_hessian()
     X_2_Y_2<dim> x_2_y_2;
 
     Vector<double> function_coeffs(dof_handler_f.n_dofs());
-    VectorTools::interpolate(dof_handler_f, sin_pi_x_sin_pi_y, function_coeffs);
+    VectorTools::interpolate(dof_handler_f, cos_pi_x_cos_pi_y, function_coeffs);
 
     std::vector<Point<3>> errors;
 
 
     /***************************************************************************
      ***************************************************************************/
-
-
-    // TODO: Check to see if the function was interpolated correctly
-//    for (auto cell_f : dof_handler_f.active_cell_iterators()) {
-//        fe_values_f.reinit(cell_f);
-//
-//        std::vector<double> function_values(n_quad_points);
-//        fe_values_f.get_function_values(function_coeffs, function_values);
-//
-//        const auto points = fe_values_f.get_quadrature_points();
-//        for (unsigned int q = 0; q < n_quad_points; ++q) {
-//            Point<3> error(points[q](0), points[q](1), std::abs(function_values[q] -
-//                           sin_pi_x_sin_pi_y.value(points[q], 0)));
-//            errors.push_back(error);
-//        }
-//    }
 
     // Setup cell iterators
     typename DoFHandler<dim>::active_cell_iterator
@@ -1286,6 +1272,28 @@ void WGOptimalTransport<dim>::compute_hessian()
                     std::vector<Tensor<1, dim>> function_gradients(n_quad_points_face);
                     fe_values_f_face.get_function_gradients(function_coeffs, function_gradients);
 
+                    if (cell_f->at_boundary(f) == false) {
+                        const auto neighbor = cell_f->neighbor(f);
+                        fe_values_f_face.reinit(neighbor, cell_f->face(f));
+                        std::vector<Tensor<1, dim>> neighbor_function_gradients(n_quad_points_face);
+                        fe_values_f_face.get_function_gradients(function_coeffs, neighbor_function_gradients);
+
+                        for (unsigned q = 0; q < n_quad_points_face; ++q) {
+                            function_gradients[q] = 0.5 * (function_gradients[q] + neighbor_function_gradients[q]);
+                        }
+                    }
+
+                    // Record error in function gradient
+//                    const auto points = fe_values_h_face.get_quadrature_points();
+//                    for (unsigned int q = 0; q < n_quad_points_face; ++q) {
+//                        Point<3> error(points[q](0), points[q](1),
+//                                       std::abs(function_gradients[q][0]- sin_pi_x_sin_pi_y.gradient(points[q], 0)[0]));
+//                        errors.push_back(error);
+//                        Point<3> error1(points[q](0), points[q](1),
+//                                       std::abs(function_gradients[q][1]- sin_pi_x_sin_pi_y.gradient(points[q], 0)[1]));
+//                        errors.push_back(error1);
+//                    }
+
                     for (unsigned int q = 0; q < n_quad_points_face; ++q) {
 
                         const auto normal = fe_values_h_face.normal_vector(q);
@@ -1297,30 +1305,29 @@ void WGOptimalTransport<dim>::compute_hessian()
                         }
                     }
 
-                    // TODO: Compute cell_dw2pd
-                    cell_matrix_M.vmult(cell_dw2pd_coeffs, cell_vector_G);
-                    std::vector<double> cell_dw2pds(n_quad_points);
-                    std::vector<types::global_dof_index> local_dof_indices = {0};
-                    fe_values_h.get_function_values(cell_dw2pd_coeffs, local_dof_indices, cell_dw2pds);
-
-                    const auto points = fe_values_h.get_quadrature_points();
-                    for (unsigned int q = 0; q < n_quad_points; ++q) {
-                        Point<3> error(points[q](0), points[q](1), std::abs(cell_dw2pds[q] - sin_pi_x_sin_pi_y.hessian(points[q], 0)[d1][d2]));
-                        errors.push_back(error);
-                    }
-
-
-
                     // TODO: Check myself before I wreck myself
                 }
+
+                // TODO: Compute cell_dw2pd
+
+                cell_matrix_M.vmult(cell_dw2pd_coeffs, cell_vector_G);
+                std::vector<double> cell_dw2pds(n_quad_points);
+                std::vector<types::global_dof_index> local_dof_indices = {0};
+                fe_values_h.get_function_values(cell_dw2pd_coeffs, local_dof_indices, cell_dw2pds);
+
+                // Record error in function hessian
+                const auto points = fe_values_h.get_quadrature_points();
+                if (d1 == d1) {
+                    for (unsigned int q = 0; q < n_quad_points; ++q) {
+                        Point<3> error(points[q](0), points[q](1),
+                                       std::abs(cell_dw2pds[q] - cos_pi_x_cos_pi_y.hessian(points[q], 0)[d1][d2]));
+                        errors.push_back(error);
+                    }
+                }
+
             }
         }
     }
-
-
-
-
-
 
     // Output error data for visualaization
     std::remove("./error_z.txt");
@@ -1336,7 +1343,7 @@ void WGOptimalTransport<dim>::compute_hessian()
 template <int dim>
 void WGOptimalTransport<dim>::run()
 {
-    make_grid(3);
+    make_grid(6);
     setup_system();
     //assemble_system_matrix();
     //assemble_system_rhs(0);
