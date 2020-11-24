@@ -71,6 +71,7 @@ private:
     void assemble_system_matrix();
     void assemble_system_rhs(unsigned int degree);
     void compute_hessian();
+    void compute_pressure_error();
     void solve();
     void output_results() const;
 
@@ -681,23 +682,7 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
 template<int dim>
 void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
 {
-    // Create a finite element that will be used to compute discrete weak
-    // 2nd-order partial derivatives.
-    FE_DGQ<dim> fe_pd(degree);
-    DoFHandler<dim> dof_handler_pd(triangulation);
-    dof_handler_pd.distribute_dofs(fe_pd);
-
-    // Create a finite element that will be used for extending the gradient of the
-    // interior solution function to the faces.
-    FE_DGQ<dim> fe_etf(fe.degree);
-    DoFHandler<dim> dof_handler_etf(triangulation);
-    dof_handler_etf.distribute_dofs(fe_etf);
-
     const QGauss<dim>     quadrature_formula(fe.degree + 1);
-    Point<dim> cell_center(0.5, 0.5);
-    Point<dim - 1> face_midpoint(0.5);
-    const Quadrature<dim> quadrature_cell_center({cell_center}, {1});
-    const Quadrature<dim - 1> quadrature_face_midpoint({face_midpoint}, {1});
     const QGauss<dim - 1> face_quadrature_formula(fe.degree + 1);
 
     FEValues<dim>     fe_values(fe,
@@ -705,39 +690,14 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                                 update_values | update_quadrature_points | update_gradients |
                                 update_JxW_values);
 
-    FEValues<dim> fe_values_center(fe,
-                                   quadrature_cell_center,
-                                   update_values | update_quadrature_points | update_gradients |
-                                   update_JxW_values);
-
     FEFaceValues<dim> fe_face_values(fe,
                                      face_quadrature_formula,
                                      update_values | update_normal_vectors |
                                      update_quadrature_points |
                                      update_JxW_values);
 
-    FEValues<dim>     fe_values_pd(fe_pd,
-                                   quadrature_formula,
-                                   update_values | update_gradients |
-                                   update_quadrature_points | update_hessians |
-                                   update_JxW_values);
-
-    FEFaceValues<dim> fe_face_values_pd(fe_pd,
-                                        face_quadrature_formula,
-                                        update_values | update_normal_vectors | update_gradients |
-                                        update_quadrature_points |
-                                        update_JxW_values);
-
-    FEFaceValues<dim> fe_face_values_etf(fe_etf,
-                                         quadrature_face_midpoint,
-                                         update_values | update_gradients |
-                                         update_quadrature_points);
-
 
     const unsigned int dofs_per_cell      = fe.dofs_per_cell;
-
-
-    const unsigned int dofs_per_cell_pd   = fe_pd.dofs_per_cell;
 
     const unsigned int n_q_points      = fe_values.get_quadrature().size();
     const unsigned int n_face_q_points = fe_face_values.get_quadrature().size();
@@ -746,25 +706,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
     std::vector<double> right_hand_side_values(n_q_points);
     Vector<double>     cell_rhs(dofs_per_cell);
 
-    FullMatrix<double> cell_matrix_M(dofs_per_cell_pd,
-                                     dofs_per_cell_pd);
-    Vector<double> cell_vector_G(dofs_per_cell_pd);
-
-    Vector<double> cell_partial_deriv(dofs_per_cell_pd);
-    std::vector<std::vector<std::vector<double>>> cell_partial_derivs(dim,
-                                                                 std::vector<std::vector<double>> (dim,
-                                                                         std::vector<double>(n_q_points)));
-    std::vector<double> cell_det_hessian(n_q_points);
-
-    std::vector<double> exact_hessian_det_values(n_q_points);
-
-
-
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-
-
-
-
 
     // We need <code>FEValuesExtractors</code> to access the @p interior and
     // @p face component of the shape functions.
@@ -778,17 +720,14 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
 
     typename DoFHandler<dim>::active_cell_iterator
             cell = dof_handler.begin_active(),
-            endc = dof_handler.end(),
-            cell_pd = dof_handler_pd.begin_active(),
-            cell_etf = dof_handler_etf.begin_active();
+            endc = dof_handler.end();
 
     std::vector<Point<3>> errors_in_solution_gradient;
     std::vector<double> errors_x;
     std::vector<double> errors_y;
-    for (; cell != endc; ++cell, ++cell_pd, ++cell_etf)
+    for (; cell != endc; ++cell)
     {
         fe_values.reinit(cell);
-        fe_values_pd.reinit(cell_pd);
 
         right_hand_side.value_list(fe_values.get_quadrature_points(),
                                    right_hand_side_values);
@@ -806,11 +745,6 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
         constraints.distribute_local_to_global(
                 cell_rhs, local_dof_indices, system_rhs);
     }
-    //std::cout << "max error: " << *std::max_element(errors_in_solution_gradient.begin(), errors_in_solution_gradient.end()) << std::endl;
-    std::remove("./error_z.txt");
-    std::ofstream output_file_z("./error_z.txt");
-    std::ostream_iterator<Point<3>> output_iterator(output_file_z, "\n");
-    std::copy(errors_in_solution_gradient.begin(), errors_in_solution_gradient.end(), output_iterator);
 }
 
 
@@ -1097,6 +1031,23 @@ void WGOptimalTransport<dim>::compute_hessian()
     std::copy(errors.begin(), errors.end(), output_iterator);
 }
 
+
+template <int dim>
+void WGOptimalTransport<dim>::compute_pressure_error()
+{
+    Vector<float> difference_per_cell(triangulation.n_active_cells());
+    const ComponentSelectFunction<dim> select_interior_pressure(0, 2);
+    VectorTools::integrate_difference(dof_handler,
+                                      solution,
+                                      Cos_pi_x_Cos_pi_y<dim>(),
+                                      difference_per_cell,
+                                      QGauss<dim>(fe.degree + 2),
+                                      VectorTools::L2_norm,
+                                      &select_interior_pressure);
+    const double L2_error = difference_per_cell.l2_norm();
+    std::cout << "L2_error_pressure " << L2_error << std::endl;
+}
+
 // @sect4{WGOptimalTransport::run}
 
 // This is the final function of the main class. It calls the other functions
@@ -1104,20 +1055,19 @@ void WGOptimalTransport<dim>::compute_hessian()
 template <int dim>
 void WGOptimalTransport<dim>::run()
 {
-    make_grid(6);
+    make_grid(3);
     setup_system();
-    //assemble_system_matrix();
-    //assemble_system_rhs(0);
+    assemble_system_matrix();
+    assemble_system_rhs(0);
     // Example functions
-    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
-    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
-    X_2_Y_2<dim> x_2_y_2;
-    VectorTools::interpolate(dof_handler, cos_pi_x_cos_pi_y, solution);
-    compute_hessian();
-    //solve();
-    //assemble_system_rhs(0);
-    //compute_postprocessed_velocity();
-    //compute_pressure_error();
-    //compute_velocity_errors();
-    //output_results();
+//    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
+//    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
+//    X_2_Y_2<dim> x_2_y_2;
+//    VectorTools::interpolate(dof_handler, cos_pi_x_cos_pi_y, solution);
+//    compute_hessian();
+    solve();
+//    std::ifstream file_in("cos_cos_3_refs.txt");
+//    solution.block_read(file_in);
+    compute_pressure_error();
+//    output_results();
 }
