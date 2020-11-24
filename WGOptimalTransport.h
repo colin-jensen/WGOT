@@ -69,7 +69,7 @@ private:
     void make_grid(unsigned int n_refinements);
     void setup_system();
     void assemble_system_matrix();
-    void assemble_system_rhs(unsigned int degree);
+    void assemble_system_rhs();
     void compute_hessian();
     void compute_pressure_error();
     void solve();
@@ -165,8 +165,8 @@ template <int dim>
 double RightHandSide<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
-    return (2 * numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
-            std::cos(numbers::PI * p[1]));
+    return (2 * numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
+            std::sin(numbers::PI * p[1]));
 }
 
 
@@ -680,7 +680,7 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
 }
 
 template<int dim>
-void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
+void WGOptimalTransport<dim>::assemble_system_rhs()
 {
     const QGauss<dim>     quadrature_formula(fe.degree + 1);
     const QGauss<dim - 1> face_quadrature_formula(fe.degree + 1);
@@ -740,6 +740,25 @@ void WGOptimalTransport<dim>::assemble_system_rhs(unsigned int degree)
                 cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
                                 right_hand_side_values[q] * fe_values.JxW(q));
             }
+
+        for (const auto &face : cell->face_iterators()) {
+            if (face->at_boundary()){
+                fe_face_values.reinit(cell, face);
+
+                std::vector<Tensor<1, dim>> boundary_values(n_face_q_points);
+                sin_pi_x_sin_pi_y.gradient_list(fe_face_values.get_quadrature_points(), boundary_values);
+
+                for (unsigned int q = 0; q < n_face_q_points; ++q) {
+                    const auto normal = fe_face_values.normal_vector(q);
+                    const auto neumann_value = boundary_values[q] * normal;
+                    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+                        cell_rhs(i) -= neumann_value *
+                                       fe_face_values[pressure_face].value(i, q) *
+                                       fe_face_values.JxW(q);
+                    }
+                }
+            }
+        }
 
         cell->get_dof_indices(local_dof_indices);
         constraints.distribute_local_to_global(
@@ -1039,7 +1058,7 @@ void WGOptimalTransport<dim>::compute_pressure_error()
     const ComponentSelectFunction<dim> select_interior_pressure(0, 2);
     VectorTools::integrate_difference(dof_handler,
                                       solution,
-                                      Cos_pi_x_Cos_pi_y<dim>(),
+                                      Sin_pi_x_Sin_pi_y<dim>(),
                                       difference_per_cell,
                                       QGauss<dim>(fe.degree + 2),
                                       VectorTools::L2_norm,
@@ -1055,10 +1074,10 @@ void WGOptimalTransport<dim>::compute_pressure_error()
 template <int dim>
 void WGOptimalTransport<dim>::run()
 {
-    make_grid(3);
+    make_grid(4);
     setup_system();
     assemble_system_matrix();
-    assemble_system_rhs(0);
+    assemble_system_rhs();
     // Example functions
 //    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
 //    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
