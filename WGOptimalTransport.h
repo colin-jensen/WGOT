@@ -866,8 +866,6 @@ void WGOptimalTransport<dim>::compute_hessian()
     Point<dim - 1> face_midpoint(0.5);
     Quadrature<dim> quadrature_formula(cell_center);
     Quadrature<dim - 1> quadrature_formula_face(face_midpoint);
-//    QGauss<dim> quadrature_formula(2);
-//    QGauss<dim - 1> quadrature_formula_face(2);
 
     // For accessing the values of the DW2PD basis functions on cell interiors
     FEValues<dim> fe_values_h(fe_h,
@@ -900,7 +898,6 @@ void WGOptimalTransport<dim>::compute_hessian()
                                        update_quadrature_points);
 
     const unsigned int n_quad_points = quadrature_formula.size();
-    const unsigned int n_quad_points_face = quadrature_formula_face.size();
     const unsigned int dofs_per_cell_h = fe_values_h.dofs_per_cell;
 
     FullMatrix<double> cell_matrix_M(dofs_per_cell_h, dofs_per_cell_h);
@@ -987,20 +984,39 @@ void WGOptimalTransport<dim>::compute_hessian()
 
                     // TODO: Incorporate face gradient part of G
 
-                    std::vector<Tensor<1, dim>> function_gradients(n_quad_points_face);
-                    fe_values_f_face.get_function_gradients(solution, interior_dof_indices, function_gradients);
+                    std::vector<Tensor<1, dim>> function_gradients(n_quad_points);
+                    if (cell_f->at_boundary(f)) {
+                        fe_values_f_face.get_function_gradients(solution, interior_dof_indices, function_gradients);
+                    }
+                    else {
+                        // Get value of gradient at cell center
+                        fe_values_f.get_function_gradients(solution, interior_dof_indices, function_gradients);
 
-                    // Take average of gradient at the neighboring cell
-//                    if (cell_f->at_boundary(f) == false) {
-//                        const auto neighbor = cell_f->neighbor(f);
-//                        fe_values_f_face.reinit(neighbor, cell_f->face(f));
-//                        std::vector<Tensor<1, dim>> neighbor_function_gradients(n_quad_points_face);
-//                        fe_values_f_face.get_function_gradients(function_coeffs, neighbor_function_gradients);
-//
-//                        for (unsigned q = 0; q < n_quad_points_face; ++q) {
-//                            function_gradients[q] = 0.5 * (function_gradients[q] + neighbor_function_gradients[q]);
-//                        }
-//                    }
+                        // Get the dof pertaining to the neighboring cells
+                        cell->neighbor(f)->get_dof_indices(local_dof_indices);
+                        std::vector<types::global_dof_index> neighbor_interior_dof_indices;
+
+                        // Filter out the dofs pertaining to the interior component of the FESystem
+                        for (unsigned int i = 0; i < fe.dofs_per_cell; ++i) {
+                            auto index_pair = fe.system_to_component_index(i);
+                            if (index_pair.first == 0) {
+                                neighbor_interior_dof_indices.push_back(local_dof_indices[i]);
+                            }
+                        }
+
+                        // Get the function gradients at the center of the neighboring cell
+                        const auto neighbor = cell_f->neighbor(f);
+                        fe_values_f.reinit(neighbor);
+                        std::vector<Tensor<1, dim>> neighbor_function_gradients(n_quad_points);
+                        fe_values_f.get_function_gradients(solution,
+                                                           neighbor_interior_dof_indices,
+                                                           neighbor_function_gradients);
+
+                        // Average the gradients of the current cell and its neighbor
+                        for (unsigned int q = 0; q < n_quad_points; ++q) {
+                            function_gradients[q] = 0.5 * (function_gradients[q] + neighbor_function_gradients[q]);
+                        }
+                    }
 
                     // Record error in function gradient
 //                    const auto points = fe_values_f_face.get_quadrature_points();
@@ -1013,8 +1029,7 @@ void WGOptimalTransport<dim>::compute_hessian()
 //                        errors.push_back(error1);
 //                    }
 
-                    for (unsigned int q = 0; q < n_quad_points_face; ++q) {
-
+                    for (unsigned int q = 0; q < n_quad_points; ++q) {
                         const auto normal = fe_values_h_face.normal_vector(q);
                         for (unsigned int k = 0; k < dofs_per_cell_h; ++k) {
                             cell_vector_G(k) += function_gradients[q][d1] *
@@ -1036,7 +1051,7 @@ void WGOptimalTransport<dim>::compute_hessian()
                 const auto points = fe_values_h.get_quadrature_points();
                 for (unsigned int q = 0; q < n_quad_points; ++q) {
                     Point<3> error(points[q](0), points[q](1),
-                                   std::abs(cell_dw2pds[q] - cos_pi_x_cos_pi_y.hessian(points[q], 0)[d1][d2]));
+                                   std::abs(cell_dw2pds[q] - sin_pi_x_sin_pi_y.hessian(points[q], 0)[d1][d2]));
                     errors.push_back(error);
                 }
             }
@@ -1074,21 +1089,22 @@ void WGOptimalTransport<dim>::compute_pressure_error()
 template <int dim>
 void WGOptimalTransport<dim>::run()
 {
-    make_grid(5);
+    make_grid(4);
     setup_system();
 //    assemble_system_matrix();
 //    assemble_system_rhs();
     // Example functions
 //    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
-//    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
+    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
 //    X_2_Y_2<dim> x_2_y_2;
-//    VectorTools::interpolate(dof_handler, cos_pi_x_cos_pi_y, solution);
-//    compute_hessian();
+    VectorTools::interpolate(dof_handler, sin_pi_x_sin_pi_y, solution);
 //    solve();
 //    std::ofstream file_out("sin_sin_5_refs.txt");
 //    solution.block_write(file_out);
 //    std::ifstream file_in("cos_cos_3_refs.txt");
 //    solution.block_read(file_in);
-    compute_pressure_error();
+//    compute_pressure_error();
+    compute_hessian();
+
 //    output_results();
 }
