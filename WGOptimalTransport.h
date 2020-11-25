@@ -1089,22 +1089,22 @@ void WGOptimalTransport<dim>::compute_pressure_error()
 template <int dim>
 void WGOptimalTransport<dim>::run()
 {
-    make_grid(4);
+    make_grid(5);
     setup_system();
-//    assemble_system_matrix();
-//    assemble_system_rhs();
+    assemble_system_matrix();
+    assemble_system_rhs();
     // Example functions
 //    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
-    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
+//    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
 //    X_2_Y_2<dim> x_2_y_2;
-    VectorTools::interpolate(dof_handler, sin_pi_x_sin_pi_y, solution);
-//    solve();
-//    std::ofstream file_out("sin_sin_5_refs.txt");
-//    solution.block_write(file_out);
-//    std::ifstream file_in("cos_cos_3_refs.txt");
+//    VectorTools::interpolate(dof_handler, sin_pi_x_sin_pi_y, solution);
+    solve();
+    std::ofstream file_out("sin_sin_5_refs_deg_1.txt");
+    solution.block_write(file_out);
+//    std::ifstream file_in("sin_sin_4_refs.txt");
 //    solution.block_read(file_in);
-//    compute_pressure_error();
-    compute_hessian();
+    compute_pressure_error();
+//    compute_hessian();
 
 //    output_results();
 }
