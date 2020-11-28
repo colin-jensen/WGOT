@@ -372,19 +372,39 @@ void WGOptimalTransport<dim>::setup_system()
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
 
-
     {
-        constraints.clear();
+        // Handle uniqueness problem that results from Neumann boundary conditions
         const FEValuesExtractors::Scalar interface_pressure(1);
         const ComponentMask              interface_pressure_mask =
                 fe.component_mask(interface_pressure);
-        VectorTools::interpolate_boundary_values(dof_handler,
-                                                 0,
-                                                 BoundaryValues<dim>(),
-                                                 constraints,
-                                                 interface_pressure_mask);
+        std::vector<bool> boundary_dofs(dof_handler.n_dofs(), false);
+        DoFTools::extract_boundary_dofs(dof_handler,
+                                        interface_pressure_mask,
+                                        boundary_dofs);
+        const unsigned int first_boundary_dof = std::distance(
+                boundary_dofs.begin(),
+                std::find(boundary_dofs.begin(), boundary_dofs.end(), true));
+        constraints.clear();
+        constraints.add_line(first_boundary_dof);
+        for (unsigned int i = first_boundary_dof + 1; i < dof_handler.n_dofs(); ++i)
+            if (boundary_dofs[i] == true)
+                constraints.add_entry(first_boundary_dof, i, -1);
         constraints.close();
     }
+
+
+//    {
+//        constraints.clear();
+//        const FEValuesExtractors::Scalar interface_pressure(1);
+//        const ComponentMask              interface_pressure_mask =
+//                fe.component_mask(interface_pressure);
+//        VectorTools::interpolate_boundary_values(dof_handler,
+//                                                 0,
+//                                                 BoundaryValues<dim>(),
+//                                                 constraints,
+//                                                 interface_pressure_mask);
+//        constraints.close();
+//    }
 
 
     // In the bilinear form, there is no integration term over faces
@@ -487,6 +507,8 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
     const FEValuesExtractors::Vector velocities(0);
     const FEValuesExtractors::Scalar pressure_interior(0);
     const FEValuesExtractors::Scalar pressure_face(1);
+
+    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
     for (const auto &cell : dof_handler.active_cell_iterators())
     {
         fe_values.reinit(cell);
@@ -572,6 +594,26 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                 cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
                                 right_hand_side_values[q] * fe_values.JxW(q));
             }
+
+        for (const auto &face : cell->face_iterators()) {
+            if (face->at_boundary()){
+                fe_face_values.reinit(cell, face);
+
+                std::vector<Tensor<1, dim>> boundary_values(n_face_q_points);
+                sin_pi_x_sin_pi_y.gradient_list(fe_face_values.get_quadrature_points(), boundary_values);
+
+                for (unsigned int q = 0; q < n_face_q_points; ++q) {
+                    const auto normal = fe_face_values.normal_vector(q);
+                    const auto neumann_value = boundary_values[q] * normal;
+                    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+                        cell_rhs(i) += neumann_value *
+                                       fe_face_values[pressure_face].value(i, q) *
+                                       fe_face_values.JxW(q);
+                    }
+                }
+            }
+        }
+
         cell->get_dof_indices(local_dof_indices);
         constraints.distribute_local_to_global(
                 local_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
