@@ -19,7 +19,6 @@
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_accessor.h>
 #include <deal.II/dofs/dof_tools.h>
-#include <deal.II/fe/fe_q.h>
 #include <deal.II/fe/fe_dgq.h>
 #include <deal.II/fe/fe_raviart_thomas.h>
 #include <deal.II/fe/fe_dg_vector.h>
@@ -30,8 +29,6 @@
 #include <deal.II/numerics/vector_tools.h>
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/data_out_faces.h>
-#include <deal.II/grid/grid_out.h>
-#include <deal.II/grid/grid_tools.h>
 
 #include <fstream>
 #include <iostream>
@@ -135,18 +132,14 @@ public:
     BoundaryValues()
             : Function<dim>(2)
     {}
-
     virtual double value(const Point<dim> & p,
                          const unsigned int component = 0) const override;
 };
-
-
-
 template <int dim>
-double BoundaryValues<dim>::value(const Point<dim> & p,
+double BoundaryValues<dim>::value(const Point<dim> & /*p*/,
                                   const unsigned int /*component*/) const
 {
-    return std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+    return 0;
 }
 
 
@@ -158,7 +151,6 @@ public:
     virtual double value(const Point<dim> & p,
                          const unsigned int component = 0) const override;
 };
-
 
 
 template <int dim>
@@ -331,7 +323,7 @@ SymmetricTensor<dim, dim> X_2_Y_2<dim>::hessian(const Point<dim> &p,
 // interface pressures, $p^\circ$ and $p^\partial$.
 template <int dim>
 WGOptimalTransport<dim>::WGOptimalTransport(const unsigned int degree)
-        : fe(FE_DGQ<dim>(degree), 1, FE_FaceQ<dim>(degree - 1), 1)
+        : fe(FE_DGQ<dim>(degree), 1, FE_FaceQ<dim>(degree), 1)
         , dof_handler(triangulation)
         , fe_dgrt(degree)
         , dof_handler_dgrt(triangulation)
@@ -374,44 +366,25 @@ void WGOptimalTransport<dim>::setup_system()
     dof_handler.distribute_dofs(fe);
     dof_handler_dgrt.distribute_dofs(fe_dgrt);
 
-    std::cout << "   Number of pressure degrees of freedom per cell: "
-              << fe.dofs_per_cell << std::endl;
+    std::cout << "   Number of pressure degrees of freedom: "
+              << dof_handler.n_dofs() << std::endl;
 
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
 
-    // Handle uniqueness problem that results from Neumann boundary conditions
-    const FEValuesExtractors::Scalar interface_pressure(1);
-    const ComponentMask              interface_pressure_mask =
-        fe.component_mask(interface_pressure);
-    std::vector<bool> boundary_dofs(dof_handler.n_dofs(), false);
-    DoFTools::extract_boundary_dofs(dof_handler,
-                                    interface_pressure_mask,
-                                    boundary_dofs);
-    const unsigned int first_boundary_dof = std::distance(
-            boundary_dofs.begin(),
-            std::find(boundary_dofs.begin(), boundary_dofs.end(), true));
-    constraints.clear();
-    constraints.add_line(first_boundary_dof);
-    for (unsigned int i = first_boundary_dof + 1; i < dof_handler.n_dofs(); ++i)
-        if (boundary_dofs[i] == true)
-            constraints.add_entry(first_boundary_dof, i, -1);
-    constraints.close();
 
-
-
-//    {
-//        constraints.clear();
-//        const FEValuesExtractors::Scalar interface_pressure(1);
-//        const ComponentMask              interface_pressure_mask =
-//                fe.component_mask(interface_pressure);
-//        VectorTools::interpolate_boundary_values(dof_handler,
-//                                                 0,
-//                                                 BoundaryValues<dim>(),
-//                                                 constraints,
-//                                                 interface_pressure_mask);
-//        constraints.close();
-//    }
+    {
+        constraints.clear();
+        const FEValuesExtractors::Scalar interface_pressure(1);
+        const ComponentMask              interface_pressure_mask =
+                fe.component_mask(interface_pressure);
+        VectorTools::interpolate_boundary_values(dof_handler,
+                                                 0,
+                                                 BoundaryValues<dim>(),
+                                                 constraints,
+                                                 interface_pressure_mask);
+        constraints.close();
+    }
 
 
     // In the bilinear form, there is no integration term over faces
@@ -475,7 +448,6 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
 {
     const QGauss<dim>     quadrature_formula(fe_dgrt.degree + 1);
     const QGauss<dim - 1> face_quadrature_formula(fe_dgrt.degree + 1);
-
     FEValues<dim>     fe_values(fe,
                                 quadrature_formula,
                                 update_values | update_quadrature_points |
@@ -485,7 +457,6 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                                      update_values | update_normal_vectors |
                                      update_quadrature_points |
                                      update_JxW_values);
-
     FEValues<dim>     fe_values_dgrt(fe_dgrt,
                                      quadrature_formula,
                                      update_values | update_gradients |
@@ -497,63 +468,35 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                                           update_normal_vectors |
                                           update_quadrature_points |
                                           update_JxW_values);
-
-    const unsigned int dofs_per_cell      = fe.dofs_per_cell;
-    const unsigned int dofs_per_cell_dgrt = fe_dgrt.dofs_per_cell;
-
+    const unsigned int dofs_per_cell      = fe.n_dofs_per_cell();
+    const unsigned int dofs_per_cell_dgrt = fe_dgrt.n_dofs_per_cell();
     const unsigned int n_q_points      = fe_values.get_quadrature().size();
     const unsigned int n_q_points_dgrt = fe_values_dgrt.get_quadrature().size();
-
     const unsigned int n_face_q_points = fe_face_values.get_quadrature().size();
-
     RightHandSide<dim>  right_hand_side;
     std::vector<double> right_hand_side_values(n_q_points);
-
     const Coefficient<dim>      coefficient;
     std::vector<Tensor<2, dim>> coefficient_values(n_q_points);
-
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-
-
-    // Next, let us declare the various cell matrices discussed in the
-    // introduction:
     FullMatrix<double> cell_matrix_M(dofs_per_cell_dgrt, dofs_per_cell_dgrt);
     FullMatrix<double> cell_matrix_G(dofs_per_cell_dgrt, dofs_per_cell);
     FullMatrix<double> cell_matrix_C(dofs_per_cell, dofs_per_cell_dgrt);
     FullMatrix<double> local_matrix(dofs_per_cell, dofs_per_cell);
     Vector<double>     cell_rhs(dofs_per_cell);
     Vector<double>     cell_solution(dofs_per_cell);
-
-    // We need <code>FEValuesExtractors</code> to access the @p interior and
-    // @p face component of the shape functions.
     const FEValuesExtractors::Vector velocities(0);
     const FEValuesExtractors::Scalar pressure_interior(0);
     const FEValuesExtractors::Scalar pressure_face(1);
-
-    // This finally gets us in position to loop over all cells. On
-    // each cell, we will first calculate the various cell matrices
-    // used to construct the local matrix -- as they depend on the
-    // cell in question, they need to be re-computed on each cell. We
-    // need shape functions for the Raviart-Thomas space as well, for
-    // which we need to create first an iterator to the cell of the
-    // triangulation, which we can obtain by assignment from the cell
-    // pointing into the DoFHandler.
     for (const auto &cell : dof_handler.active_cell_iterators())
     {
         fe_values.reinit(cell);
-
         const typename Triangulation<dim>::active_cell_iterator cell_dgrt =
                 cell;
         fe_values_dgrt.reinit(cell_dgrt);
-
         right_hand_side.value_list(fe_values.get_quadrature_points(),
                                    right_hand_side_values);
         coefficient.value_list(fe_values.get_quadrature_points(),
                                coefficient_values);
-
-        // The first cell matrix we will compute is the mass matrix
-        // for the Raviart-Thomas space.  Hence, we need to loop over
-        // all the quadrature points for the velocity FEValues object.
         cell_matrix_M = 0;
         for (unsigned int q = 0; q < n_q_points_dgrt; ++q)
             for (unsigned int i = 0; i < dofs_per_cell_dgrt; ++i)
@@ -566,22 +509,7 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                     cell_matrix_M(i, k) += (v_i * v_k * fe_values_dgrt.JxW(q));
                 }
             }
-        // Next we take the inverse of this matrix by using
-        // FullMatrix::gauss_jordan(). It will be used to calculate
-        // the coefficient matrix $C^K$ later. It is worth recalling
-        // later that `cell_matrix_M` actually contains the *inverse*
-        // of $M^K$ after this call.
         cell_matrix_M.gauss_jordan();
-
-        // From the introduction, we know that the right hand side
-        // $G^K$ of the equation that defines $C^K$ is the difference
-        // between a face integral and a cell integral. Here, we
-        // approximate the negative of the contribution in the
-        // interior. Each component of this matrix is the integral of
-        // a product between a basis function of the polynomial space
-        // and the divergence of a basis function of the
-        // Raviart-Thomas space. These basis functions are defined in
-        // the interior.
         cell_matrix_G = 0;
         for (unsigned int q = 0; q < n_q_points; ++q)
             for (unsigned int i = 0; i < dofs_per_cell_dgrt; ++i)
@@ -592,27 +520,17 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                 {
                     const double phi_j_interior =
                             fe_values[pressure_interior].value(j, q);
-
                     cell_matrix_G(i, j) -=
                             (div_v_i * phi_j_interior * fe_values.JxW(q));
                 }
             }
-
-
-        // Next, we approximate the integral on faces by quadrature.
-        // Each component is the integral of a product between a basis function
-        // of the polynomial space and the dot product of a basis function of
-        // the Raviart-Thomas space and the normal vector. So we loop over all
-        // the faces of the element and obtain the normal vector.
         for (const auto &face : cell->face_iterators())
         {
             fe_face_values.reinit(cell, face);
             fe_face_values_dgrt.reinit(cell_dgrt, face);
-
             for (unsigned int q = 0; q < n_face_q_points; ++q)
             {
                 const Tensor<1, dim> normal = fe_face_values.normal_vector(q);
-
                 for (unsigned int i = 0; i < dofs_per_cell_dgrt; ++i)
                 {
                     const Tensor<1, dim> v_i =
@@ -621,25 +539,13 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                     {
                         const double phi_j_face =
                                 fe_face_values[pressure_face].value(j, q);
-
                         cell_matrix_G(i, j) +=
                                 ((v_i * normal) * phi_j_face * fe_face_values.JxW(q));
                     }
                 }
             }
         }
-
-        // @p cell_matrix_C is then the matrix product between the
-        // transpose of $G^K$ and the inverse of the mass matrix
-        // (where this inverse is stored in @p cell_matrix_M):
         cell_matrix_G.Tmmult(cell_matrix_C, cell_matrix_M);
-
-        // Finally we can compute the local matrix $A^K$.  Element
-        // $A^K_{ij}$ is given by $\int_{E} \sum_{k,l} C_{ik} C_{jl}
-        // (\mathbf{K} \mathbf{v}_k) \cdot \mathbf{v}_l
-        // \mathrm{d}x$. We have calculated the coefficients $C$ in
-        // the previous step, and so obtain the following after
-        // suitably re-arranging the loops:
         local_matrix = 0;
         for (unsigned int q = 0; q < n_q_points_dgrt; ++q)
         {
@@ -651,7 +557,6 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                 {
                     const Tensor<1, dim> v_l =
                             fe_values_dgrt[velocities].value(l, q);
-
                     for (unsigned int i = 0; i < dofs_per_cell; ++i)
                         for (unsigned int j = 0; j < dofs_per_cell; ++j)
                             local_matrix(i, j) +=
@@ -660,24 +565,19 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                 }
             }
         }
-
-        // Next, we calculate the right hand side, $\int_{K} f q \mathrm{d}x$:
-//        cell_rhs = 0;
-//        for (unsigned int q = 0; q < n_q_points; ++q)
-//            for (unsigned int i = 0; i < dofs_per_cell; ++i)
-//            {
-//                cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
-//                                right_hand_side_values[q] * fe_values.JxW(q));
-//            }
-
-        // The last step is to distribute components of the local
-        // matrix into the system matrix and transfer components of
-        // the cell right hand side into the system right hand side:
+        cell_rhs = 0;
+        for (unsigned int q = 0; q < n_q_points; ++q)
+            for (unsigned int i = 0; i < dofs_per_cell; ++i)
+            {
+                cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
+                                right_hand_side_values[q] * fe_values.JxW(q));
+            }
         cell->get_dof_indices(local_dof_indices);
         constraints.distribute_local_to_global(
-                local_matrix, local_dof_indices, system_matrix);
+                local_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
     }
 }
+
 
 template<int dim>
 void WGOptimalTransport<dim>::assemble_system_rhs()
@@ -741,24 +641,24 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
                                 right_hand_side_values[q] * fe_values.JxW(q));
             }
 
-        for (const auto &face : cell->face_iterators()) {
-            if (face->at_boundary()){
-                fe_face_values.reinit(cell, face);
-
-                std::vector<Tensor<1, dim>> boundary_values(n_face_q_points);
-                sin_pi_x_sin_pi_y.gradient_list(fe_face_values.get_quadrature_points(), boundary_values);
-
-                for (unsigned int q = 0; q < n_face_q_points; ++q) {
-                    const auto normal = fe_face_values.normal_vector(q);
-                    const auto neumann_value = boundary_values[q] * normal;
-                    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-                        cell_rhs(i) += neumann_value *
-                                       fe_face_values[pressure_face].value(i, q) *
-                                       fe_face_values.JxW(q);
-                    }
-                }
-            }
-        }
+//        for (const auto &face : cell->face_iterators()) {
+//            if (face->at_boundary()){
+//                fe_face_values.reinit(cell, face);
+//
+//                std::vector<Tensor<1, dim>> boundary_values(n_face_q_points);
+//                sin_pi_x_sin_pi_y.gradient_list(fe_face_values.get_quadrature_points(), boundary_values);
+//
+//                for (unsigned int q = 0; q < n_face_q_points; ++q) {
+//                    const auto normal = fe_face_values.normal_vector(q);
+//                    const auto neumann_value = boundary_values[q] * normal;
+//                    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+//                        cell_rhs(i) += neumann_value *
+//                                       fe_face_values[pressure_face].value(i, q) *
+//                                       fe_face_values.JxW(q);
+//                    }
+//                }
+//            }
+//        }
 
         cell->get_dof_indices(local_dof_indices);
         constraints.distribute_local_to_global(
@@ -926,7 +826,6 @@ void WGOptimalTransport<dim>::compute_hessian()
         fe_values_f.reinit(cell_f);
         fe_values_h.reinit(cell_h);
 
-        // Ensure correct interpolation
         std::vector<types::global_dof_index> local_dof_indices(fe.dofs_per_cell);
         std::vector<types::global_dof_index> interior_dof_indices;
 
@@ -940,6 +839,7 @@ void WGOptimalTransport<dim>::compute_hessian()
             }
         }
 
+        // Ensure correct interpolation
         // Record error in the interpolation
 //        std::vector<double> function_vals(n_quad_points);
 //        fe_values_f.get_function_values(solution, interior_dof_indices, function_vals);
@@ -949,7 +849,6 @@ void WGOptimalTransport<dim>::compute_hessian()
 //            Point<3> error(points[q](0),
 //                           points[q](1),
 //                           std::abs(function_vals[q] - sin_pi_x_sin_pi_y.value(points[q], 0)));
-//            std::cout << function_vals[q] << " : " << sin_pi_x_sin_pi_y.value(points[q], 0) << " : " << error << std::endl;
 //            errors.push_back(error);
 //        }
 
@@ -1020,7 +919,7 @@ void WGOptimalTransport<dim>::compute_hessian()
 
                     // Record error in function gradient
 //                    const auto points = fe_values_f_face.get_quadrature_points();
-//                    for (unsigned int q = 0; q < n_quad_points_face; ++q) {
+//                    for (unsigned int q = 0; q < n_quad_points; ++q) {
 //                        Point<3> error(points[q](0), points[q](1),
 //                                       std::abs(function_gradients[q][0]- sin_pi_x_sin_pi_y.gradient(points[q], 0)[0]));
 //                        errors.push_back(error);
@@ -1092,19 +991,19 @@ void WGOptimalTransport<dim>::run()
     make_grid(5);
     setup_system();
     assemble_system_matrix();
-    assemble_system_rhs();
+//    assemble_system_rhs();
     // Example functions
 //    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
 //    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
 //    X_2_Y_2<dim> x_2_y_2;
 //    VectorTools::interpolate(dof_handler, sin_pi_x_sin_pi_y, solution);
     solve();
-    std::ofstream file_out("sin_sin_5_refs_deg_1.txt");
-    solution.block_write(file_out);
-//    std::ifstream file_in("sin_sin_4_refs.txt");
+//    std::ofstream file_out("sin_sin_4_refs_deg_1.txt");
+//    solution.block_write(file_out);
+//    std::ifstream file_in("sin_sin_5_refs_deg_1.txt");
 //    solution.block_read(file_in);
     compute_pressure_error();
-//    compute_hessian();
+    compute_hessian();
 
 //    output_results();
 }
