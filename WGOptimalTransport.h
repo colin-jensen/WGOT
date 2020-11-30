@@ -88,6 +88,8 @@ private:
     FE_DGRaviartThomas<dim> fe_dgrt;
     DoFHandler<dim>         dof_handler_dgrt;
     Vector<double>          darcy_velocity;
+
+    Vector<double> solution_hessian_det;
 };
 
 
@@ -157,8 +159,8 @@ template <int dim>
 double RightHandSide<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
-    return (2 * numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
-            std::sin(numbers::PI * p[1]));
+    return 2 * std::pow(numbers::PI, 2) * std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]) +
+           0.5 * std::pow(numbers::PI, 4) * (std::cos(2 * numbers::PI * p[0]) + std::cos(2 * numbers::PI * p[1]));
 }
 
 
@@ -279,6 +281,61 @@ SymmetricTensor<dim, dim> Sin_pi_x_Sin_pi_y<dim>::hessian(const Point<dim> &p,
 }
 
 template <int dim>
+class Sin_2_pi_x_Sin_2_pi_y : public Function<dim>
+{
+public:
+    Sin_2_pi_x_Sin_2_pi_y()
+            : Function<dim>(2)
+    {}
+
+    virtual double value(const Point<dim> & p,
+                         const unsigned int component) const override;
+    virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
+                                              const unsigned int component) const override;
+    virtual Tensor<1, dim> gradient(const Point<dim> & p,
+                                    const unsigned int component) const override;
+};
+
+
+
+template <int dim>
+double Sin_2_pi_x_Sin_2_pi_y<dim>::value(const Point<dim> &p,
+                                     const unsigned int /*component*/) const
+{
+    return std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]) *
+           std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
+}
+
+template <int dim>
+Tensor<1, dim> Sin_2_pi_x_Sin_2_pi_y<dim>::gradient(const Point<dim> & p,
+                                                const unsigned int /*component*/) const
+{
+    Tensor<1, dim> grad;
+    grad[0] = numbers::PI * std::sin(2 * numbers::PI * p[0]) * std::sin(numbers::PI * p[1]) * std::sin(numbers::PI * p[1]);
+    grad[1] = numbers::PI * std::sin(2 * numbers::PI * p[1]) * std::sin(numbers::PI * p[1]) * std::sin(numbers::PI * p[0]);
+
+    return grad;
+}
+
+template <int dim>
+SymmetricTensor<dim, dim> Sin_2_pi_x_Sin_2_pi_y<dim>::hessian(const Point<dim> &p,
+                                                          const unsigned int /*component*/) const
+{
+    SymmetricTensor<dim, dim> return_value;
+    return_value[0][0] = 2 * std::pow(numbers::PI, 2) * (std::pow(std::cos(numbers::PI * p[0]), 2) *
+                                                         std::pow(std::sin(numbers::PI * p[1]), 2) -
+                                                         std::pow(std::sin(numbers::PI * p[0]), 2) *
+                                                         std::pow(std::sin(numbers::PI * p[1]), 2));
+    return_value[0][1] = 4 * std::pow(numbers::PI, 2) * std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]) *
+                                                        std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+    return_value[1][1] = 2 * std::pow(numbers::PI, 2) * (std::pow(std::cos(numbers::PI * p[1]), 2) *
+                                                         std::pow(std::sin(numbers::PI * p[0]), 2) -
+                                                         std::pow(std::sin(numbers::PI * p[0]), 2) *
+                                                         std::pow(std::sin(numbers::PI * p[1]), 2));
+    return return_value;
+}
+
+template <int dim>
 class X_2_Y_2 : public Function<dim>
 {
 public:
@@ -339,6 +396,8 @@ void WGOptimalTransport<dim>::make_grid(unsigned int n_refinements)
 {
     GridGenerator::hyper_cube(triangulation, 0, 1);
     triangulation.refine_global(n_refinements);
+
+    solution_hessian_det.reinit(triangulation.n_active_cells());
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -587,36 +646,10 @@ void WGOptimalTransport<dim>::assemble_system_matrix()
                 }
             }
         }
-        cell_rhs = 0;
-        for (unsigned int q = 0; q < n_q_points; ++q)
-            for (unsigned int i = 0; i < dofs_per_cell; ++i)
-            {
-                cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
-                                right_hand_side_values[q] * fe_values.JxW(q));
-            }
-
-        for (const auto &face : cell->face_iterators()) {
-            if (face->at_boundary()){
-                fe_face_values.reinit(cell, face);
-
-                std::vector<Tensor<1, dim>> boundary_values(n_face_q_points);
-                sin_pi_x_sin_pi_y.gradient_list(fe_face_values.get_quadrature_points(), boundary_values);
-
-                for (unsigned int q = 0; q < n_face_q_points; ++q) {
-                    const auto normal = fe_face_values.normal_vector(q);
-                    const auto neumann_value = boundary_values[q] * normal;
-                    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-                        cell_rhs(i) += neumann_value *
-                                       fe_face_values[pressure_face].value(i, q) *
-                                       fe_face_values.JxW(q);
-                    }
-                }
-            }
-        }
 
         cell->get_dof_indices(local_dof_indices);
         constraints.distribute_local_to_global(
-                local_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
+                local_matrix, local_dof_indices, system_matrix);
     }
 }
 
@@ -667,24 +700,24 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
     std::vector<Point<3>> errors_in_solution_gradient;
     std::vector<double> errors_x;
     std::vector<double> errors_y;
-    for (; cell != endc; ++cell)
-    {
+    for (; cell != endc; ++cell) {
         fe_values.reinit(cell);
 
         right_hand_side.value_list(fe_values.get_quadrature_points(),
                                    right_hand_side_values);
 
 
-
         cell_rhs = 0;
         for (unsigned int q = 0; q < n_q_points; ++q)
             for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-                cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
-                                right_hand_side_values[q] * fe_values.JxW(q));
+                cell_rhs(i) += fe_values[pressure_interior].value(i, q) *
+                               (right_hand_side_values[q] +
+                               solution_hessian_det[cell->active_cell_index()]) *
+                               fe_values.JxW(q);
             }
 
 //        for (const auto &face : cell->face_iterators()) {
-//            if (face->at_boundary()){
+//            if (face->at_boundary()) {
 //                fe_face_values.reinit(cell, face);
 //
 //                std::vector<Tensor<1, dim>> boundary_values(n_face_q_points);
@@ -848,9 +881,11 @@ void WGOptimalTransport<dim>::compute_hessian()
 
     Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
     Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
+    Sin_2_pi_x_Sin_2_pi_y<dim> sin_2_pi_x_sin_2_pi_y;
     X_2_Y_2<dim> x_2_y_2;
 
     std::vector<Point<3>> errors;
+    std::vector<double> errors_flat;
 
 
     /***************************************************************************
@@ -906,6 +941,8 @@ void WGOptimalTransport<dim>::compute_hessian()
             }
         }
         cell_matrix_M.gauss_jordan();
+
+        FullMatrix<double> cell_hessian(2, 2);
 
         for (unsigned int d1 = 0; d1 < dim; ++d1) {
             for (unsigned int d2 = 0; d2 < dim; ++d2) {
@@ -992,12 +1029,19 @@ void WGOptimalTransport<dim>::compute_hessian()
                 const auto points = fe_values_h.get_quadrature_points();
                 for (unsigned int q = 0; q < n_quad_points; ++q) {
                     Point<3> error(points[q](0), points[q](1),
-                                   std::abs(cell_dw2pds[q] - sin_pi_x_sin_pi_y.hessian(points[q], 0)[d1][d2]));
+                                   std::abs(cell_dw2pds[q] - sin_2_pi_x_sin_2_pi_y.hessian(points[q], 0)[d1][d2]));
                     errors.push_back(error);
+                    errors_flat.push_back(std::abs(cell_dw2pds[q] - sin_2_pi_x_sin_2_pi_y.hessian(points[q], 0)[d1][d2]));
                 }
+
+                cell_hessian(d1, d2) = cell_dw2pds[0];
             }
         }
+
+        solution_hessian_det[cell->active_cell_index()] = cell_hessian.determinant();
     }
+
+    std::cout << "max error: " << *std::max_element(errors_flat.begin(), errors_flat.end()) << std::endl;
 
     // Output error data for visualaization
     std::remove("./error_z.txt");
@@ -1014,7 +1058,7 @@ void WGOptimalTransport<dim>::compute_pressure_error()
     const ComponentSelectFunction<dim> select_interior_pressure(0, 2);
     VectorTools::integrate_difference(dof_handler,
                                       solution,
-                                      Sin_pi_x_Sin_pi_y<dim>(),
+                                      Sin_2_pi_x_Sin_2_pi_y<dim>(),
                                       difference_per_cell,
                                       QGauss<dim>(fe.degree + 2),
                                       VectorTools::L2_norm,
@@ -1032,20 +1076,27 @@ void WGOptimalTransport<dim>::run()
 {
     make_grid(5);
     setup_system();
-    assemble_system_matrix();
+//    assemble_system_matrix();
 //    assemble_system_rhs();
+//    solve();
+//    compute_pressure_error();
+//    for (unsigned int i = 0; i < 10; ++i) {
+//        compute_hessian();
+//        assemble_system_rhs();
+//        solve();
+//        compute_pressure_error();
+//    }
     // Example functions
 //    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
 //    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
+    Sin_2_pi_x_Sin_2_pi_y<dim> sin_2_pi_x_sin_2_pi_y;
 //    X_2_Y_2<dim> x_2_y_2;
-//    VectorTools::interpolate(dof_handler, sin_pi_x_sin_pi_y, solution);
-    solve();
+    VectorTools::interpolate(dof_handler, sin_2_pi_x_sin_2_pi_y, solution);
+    compute_hessian();
 //    std::ofstream file_out("sin_sin_4_refs_deg_1.txt");
 //    solution.block_write(file_out);
 //    std::ifstream file_in("sin_sin_5_refs_deg_1.txt");
 //    solution.block_read(file_in);
-    compute_pressure_error();
-    compute_hessian();
 
 //    output_results();
 }
