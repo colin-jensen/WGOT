@@ -91,6 +91,8 @@ private:
     FE_DGRaviartThomas<dim> fe_dgrt;
     DoFHandler<dim>         dof_handler_dgrt;
     Vector<double>          darcy_velocity;
+
+    Vector<double> hessian_det;
 };
 
 
@@ -165,8 +167,12 @@ template <int dim>
 double RightHandSide<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
-    return (2 * numbers::PI * numbers::PI * std::sin(numbers::PI * p[0]) *
-            std::sin(numbers::PI * p[1]));
+    double laplacian = 0.1 * -2 * numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
+                                                              std::cos(numbers::PI * p[1]);
+    double hessian_determinant = 0.1 * 0.1 * 0.5 * std::pow(numbers::PI, 4) * (std::cos(2 * numbers::PI * p[0]) +
+                                                                               std::cos(2 * numbers::PI * p[1]));
+//    return  laplacian + hessian_determinant + 1;
+    return laplacian;
 }
 
 
@@ -196,6 +202,7 @@ public:
                          const unsigned int component) const override;
     virtual Tensor<1, dim> gradient(const Point<dim> & p,
                                               const unsigned int component) const override;
+    double hessian_det(const Point<dim> & p);
 };
 
 
@@ -204,7 +211,7 @@ template <int dim>
 double Cos_pi_x_Cos_pi_y<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
-    return std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+    return 0.1 * std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
 }
 
 template <int dim>
@@ -215,7 +222,7 @@ Tensor<1, dim> Cos_pi_x_Cos_pi_y<dim>::gradient(const Point<dim> & p,
     grad[0] = -numbers::PI * std::sin(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
     grad[1] = -numbers::PI * std::sin(numbers::PI * p[1]) * std::cos(numbers::PI * p[0]);
 
-    return grad;
+    return 0.1 * grad;
 }
 
 template <int dim>
@@ -231,7 +238,13 @@ SymmetricTensor<dim, dim> Cos_pi_x_Cos_pi_y<dim>::hessian(const Point<dim> &p,
                          std::sin(numbers::PI * p[1]);
     return_value[1][1] = -numbers::PI * numbers::PI * std::cos(numbers::PI * p[0]) *
                          std::cos(numbers::PI * p[1]);
-    return return_value;
+    return 0.1 * return_value;
+}
+
+template <int dim>
+double Cos_pi_x_Cos_pi_y<dim>::hessian_det(const Point<dim> & p)
+{
+    return 0.1 * 0.1 * 0.5 * std::pow(numbers::PI, 4) * (std::cos(2 * numbers::PI * p[0]) + std::cos(2 * numbers::PI * p[1]));
 }
 
 template <int dim>
@@ -331,7 +344,7 @@ SymmetricTensor<dim, dim> X_2_Y_2<dim>::hessian(const Point<dim> &p,
 // interface pressures, $p^\circ$ and $p^\partial$.
 template <int dim>
 WGOptimalTransport<dim>::WGOptimalTransport(const unsigned int degree)
-        : fe(FE_DGQ<dim>(degree), 1, FE_FaceQ<dim>(degree - 1), 1)
+        : fe(FE_DGQ<dim>(degree), 1, FE_FaceQ<dim>(degree), 1)
         , dof_handler(triangulation)
         , fe_dgrt(degree)
         , dof_handler_dgrt(triangulation)
@@ -347,6 +360,8 @@ void WGOptimalTransport<dim>::make_grid(unsigned int n_refinements)
 {
     GridGenerator::hyper_cube(triangulation, 0, 1);
     triangulation.refine_global(n_refinements);
+
+    hessian_det.reinit(triangulation.n_active_cells());
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
               << std::endl
@@ -725,6 +740,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
     std::vector<Point<3>> errors_in_solution_gradient;
     std::vector<double> errors_x;
     std::vector<double> errors_y;
+
     for (; cell != endc; ++cell)
     {
         fe_values.reinit(cell);
@@ -734,31 +750,35 @@ void WGOptimalTransport<dim>::assemble_system_rhs()
 
 
 
+        errors_x.push_back(std::abs(fe_values));
+
+
         cell_rhs = 0;
         for (unsigned int q = 0; q < n_q_points; ++q)
             for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-                cell_rhs(i) += (fe_values[pressure_interior].value(i, q) *
-                                right_hand_side_values[q] * fe_values.JxW(q));
+                cell_rhs(i) += fe_values[pressure_interior].value(i, q) *
+                        -right_hand_side_values[q] * //(1 - right_hand_side_values[q] + hessian_det[cell->active_cell_index()]) *
+                        fe_values.JxW(q);
             }
 
-        for (const auto &face : cell->face_iterators()) {
-            if (face->at_boundary()){
-                fe_face_values.reinit(cell, face);
-
-                std::vector<Tensor<1, dim>> boundary_values(n_face_q_points);
-                sin_pi_x_sin_pi_y.gradient_list(fe_face_values.get_quadrature_points(), boundary_values);
-
-                for (unsigned int q = 0; q < n_face_q_points; ++q) {
-                    const auto normal = fe_face_values.normal_vector(q);
-                    const auto neumann_value = boundary_values[q] * normal;
-                    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
-                        cell_rhs(i) += neumann_value *
-                                       fe_face_values[pressure_face].value(i, q) *
-                                       fe_face_values.JxW(q);
-                    }
-                }
-            }
-        }
+//        for (const auto &face : cell->face_iterators()) {
+//            if (face->at_boundary()){
+//                fe_face_values.reinit(cell, face);
+//
+//                std::vector<Tensor<1, dim>> boundary_values(n_face_q_points);
+//                cos_pi_x_cos_pi_y.gradient_list(fe_face_values.get_quadrature_points(), boundary_values);
+//
+//                for (unsigned int q = 0; q < n_face_q_points; ++q) {
+//                    const auto normal = fe_face_values.normal_vector(q);
+//                    const auto neumann_value = boundary_values[q] * normal;
+//                    for (unsigned int i = 0; i < dofs_per_cell; ++i) {
+//                        cell_rhs(i) += neumann_value *
+//                                       fe_face_values[pressure_face].value(i, q) *
+//                                       fe_face_values.JxW(q);
+//                    }
+//                }
+//            }
+//        }
 
         cell->get_dof_indices(local_dof_indices);
         constraints.distribute_local_to_global(
@@ -969,6 +989,8 @@ void WGOptimalTransport<dim>::compute_hessian()
         }
         cell_matrix_M.gauss_jordan();
 
+        FullMatrix<double> cell_hessian(dim, dim);
+
         for (unsigned int d1 = 0; d1 < dim; ++d1) {
             for (unsigned int d2 = 0; d2 < dim; ++d2) {
 
@@ -1032,15 +1054,23 @@ void WGOptimalTransport<dim>::compute_hessian()
                 std::vector<types::global_dof_index> dof_indices_h = {0};
                 fe_values_h.get_function_values(cell_dw2pd_coeffs, dof_indices_h, cell_dw2pds);
 
+                cell_hessian(d1, d2) = cell_dw2pds[0];
+
                 // Record error in function hessian
-                const auto points = fe_values_h.get_quadrature_points();
-                for (unsigned int q = 0; q < n_quad_points; ++q) {
-                    Point<3> error(points[q](0), points[q](1),
-                                   std::abs(cell_dw2pds[q] - cos_pi_x_cos_pi_y.hessian(points[q], 0)[d1][d2]));
-                    errors.push_back(error);
-                }
+//                const auto points = fe_values_h.get_quadrature_points();
+//                for (unsigned int q = 0; q < n_quad_points; ++q) {
+//                    Point<3> error(points[q](0), points[q](1),
+//                                   std::abs(cell_dw2pds[q] - cos_pi_x_cos_pi_y.hessian(points[q], 0)[d1][d2]));
+//                    errors.push_back(error);
+//                }
             }
         }
+
+        hessian_det[cell->active_cell_index()] = cell_hessian.determinant();
+
+        const auto point = fe_values_h.get_quadrature_points()[0];
+        Point<3> error(point(0), point(1), std::abs(cell_hessian.determinant() - cos_pi_x_cos_pi_y.hessian_det(point)));
+        errors.push_back(error);
     }
 
     // Output error data for visualaization
@@ -1058,7 +1088,7 @@ void WGOptimalTransport<dim>::compute_pressure_error()
     const ComponentSelectFunction<dim> select_interior_pressure(0, 2);
     VectorTools::integrate_difference(dof_handler,
                                       solution,
-                                      Sin_pi_x_Sin_pi_y<dim>(),
+                                      Cos_pi_x_Cos_pi_y<dim>(),
                                       difference_per_cell,
                                       QGauss<dim>(fe.degree + 2),
                                       VectorTools::L2_norm,
@@ -1074,21 +1104,27 @@ void WGOptimalTransport<dim>::compute_pressure_error()
 template <int dim>
 void WGOptimalTransport<dim>::run()
 {
-    make_grid(5);
+    make_grid(4);
     setup_system();
-//    assemble_system_matrix();
-//    assemble_system_rhs();
+    assemble_system_matrix();
+    assemble_system_rhs();
     // Example functions
 //    Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
 //    Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
 //    X_2_Y_2<dim> x_2_y_2;
 //    VectorTools::interpolate(dof_handler, cos_pi_x_cos_pi_y, solution);
-//    compute_hessian();
-//    solve();
+    solve();
+    compute_hessian();
+    compute_pressure_error();
+//    for (unsigned int i = 0; i < 5; ++i) {
+//        compute_hessian();
+//        assemble_system_rhs();
+//        solve();
+//        compute_pressure_error();
+//    }
 //    std::ofstream file_out("sin_sin_5_refs.txt");
 //    solution.block_write(file_out);
 //    std::ifstream file_in("cos_cos_3_refs.txt");
 //    solution.block_read(file_in);
-    compute_pressure_error();
 //    output_results();
 }
