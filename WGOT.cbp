@@ -86,7 +86,7 @@
 				</MakeCommands>
 			</Target>
 		</Build>
-		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/driver.cpp">
+		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/WGOptimalTransport.cpp">
 			<Option target="WGOT"/>
 		</Unit>
 		<Unit filename="/Users/colinjensen/Documents/GitHub/WGOT/CMakeLists.txt">

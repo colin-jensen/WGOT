@@ -2,7 +2,7 @@
 // Created by Colin Jensen on 10/15/20.
 //
 
-#include "WGOptimalTransport.h"
+#include "WGOptimalTransport.cpp"
 
 int main()
 {
