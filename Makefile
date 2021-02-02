@@ -123,32 +123,32 @@ WGOT/fast:
 	$(MAKE) -f CMakeFiles/WGOT.dir/build.make CMakeFiles/WGOT.dir/build
 .PHONY : WGOT/fast
 
-WGOptimalTransport.o: WGOptimalTransport.cpp.o
+driver.o: driver.cpp.o
 
-.PHONY : WGOptimalTransport.o
+.PHONY : driver.o
 
 # target to build an object file
-WGOptimalTransport.cpp.o:
-	$(MAKE) -f CMakeFiles/WGOT.dir/build.make CMakeFiles/WGOT.dir/WGOptimalTransport.cpp.o
-.PHONY : WGOptimalTransport.cpp.o
+driver.cpp.o:
+	$(MAKE) -f CMakeFiles/WGOT.dir/build.make CMakeFiles/WGOT.dir/driver.cpp.o
+.PHONY : driver.cpp.o
 
-WGOptimalTransport.i: WGOptimalTransport.cpp.i
+driver.i: driver.cpp.i
 
-.PHONY : WGOptimalTransport.i
+.PHONY : driver.i
 
 # target to preprocess a source file
-WGOptimalTransport.cpp.i:
-	$(MAKE) -f CMakeFiles/WGOT.dir/build.make CMakeFiles/WGOT.dir/WGOptimalTransport.cpp.i
-.PHONY : WGOptimalTransport.cpp.i
+driver.cpp.i:
+	$(MAKE) -f CMakeFiles/WGOT.dir/build.make CMakeFiles/WGOT.dir/driver.cpp.i
+.PHONY : driver.cpp.i
 
-WGOptimalTransport.s: WGOptimalTransport.cpp.s
+driver.s: driver.cpp.s
 
-.PHONY : WGOptimalTransport.s
+.PHONY : driver.s
 
 # target to generate assembly for a file
-WGOptimalTransport.cpp.s:
-	$(MAKE) -f CMakeFiles/WGOT.dir/build.make CMakeFiles/WGOT.dir/WGOptimalTransport.cpp.s
-.PHONY : WGOptimalTransport.cpp.s
+driver.cpp.s:
+	$(MAKE) -f CMakeFiles/WGOT.dir/build.make CMakeFiles/WGOT.dir/driver.cpp.s
+.PHONY : driver.cpp.s
 
 # Help Target
 help:
@@ -159,9 +159,9 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... edit_cache"
 	@echo "... WGOT"
-	@echo "... WGOptimalTransport.o"
-	@echo "... WGOptimalTransport.i"
-	@echo "... WGOptimalTransport.s"
+	@echo "... driver.o"
+	@echo "... driver.i"
+	@echo "... driver.s"
 .PHONY : help
 
 
