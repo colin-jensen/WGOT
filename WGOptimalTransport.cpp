@@ -1048,19 +1048,6 @@ void WGOptimalTransport<dim>::compute_hessian()
             }
         }
 
-        // Record error in the interpolation
-//        std::vector<double> function_vals(n_quad_points);
-//        fe_values_f.get_function_values(solution, interior_dof_indices, function_vals);
-//
-//        const auto points = fe_values_f.get_quadrature_points();
-//        for (unsigned int q = 0; q < n_quad_points; ++q) {
-//            Point<3> error(points[q](0),
-//                           points[q](1),
-//                           std::abs(function_vals[q] - sin_pi_x_sin_pi_y.value(points[q], 0)));
-//            std::cout << function_vals[q] << " : " << sin_pi_x_sin_pi_y.value(points[q], 0) << " : " << error << std::endl;
-//            errors.push_back(error);
-//        }
-
         // TODO: Build mass matrix
         cell_matrix_M = 0;
         for (unsigned int q = 0; q < n_quad_points; ++q) {
@@ -1102,17 +1089,6 @@ void WGOptimalTransport<dim>::compute_hessian()
                     std::vector<Tensor<1, dim>> function_gradients(n_quad_points_face);
                     fe_values_f_face.get_function_gradients(solution, interior_dof_indices, function_gradients);
 
-                    // Record error in function gradient
-//                    const auto points = fe_values_f_face.get_quadrature_points();
-//                    for (unsigned int q = 0; q < n_quad_points_face; ++q) {
-//                        Point<3> error(points[q](0), points[q](1),
-//                                       std::abs(function_gradients[q][0]- sin_pi_x_sin_pi_y.gradient(points[q], 0)[0]));
-//                        errors.push_back(error);
-//                        Point<3> error1(points[q](0), points[q](1),
-//                                       std::abs(function_gradients[q][1]- sin_pi_x_sin_pi_y.gradient(points[q], 0)[1]));
-//                        errors.push_back(error1);
-//                    }
-
                     for (unsigned int q = 0; q < n_quad_points_face; ++q) {
 
                         const auto normal = fe_values_h_face.normal_vector(q);
@@ -1135,14 +1111,6 @@ void WGOptimalTransport<dim>::compute_hessian()
                 for (unsigned int q = 0; q < n_quad_points; ++q) {
                     cell_hessian[q](d1, d2) = cell_dw2pds[q];
                 }
-
-                // Record error in function hessian
-//                const auto points = fe_values_h.get_quadrature_points();
-//                for (unsigned int q = 0; q < n_quad_points; ++q) {
-//                    Point<3> error(points[q](0), points[q](1),
-//                                   std::abs(cell_dw2pds[q] - cos_pi_x_cos_pi_y.hessian(points[q], 0)[d1][d2]));
-//                    errors.push_back(error);
-//                }
             }
         }
 
