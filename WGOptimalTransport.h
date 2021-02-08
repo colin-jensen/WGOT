@@ -32,6 +32,7 @@
 #include <deal.II/numerics/data_out_faces.h>
 #include <deal.II/grid/grid_out.h>
 #include <deal.II/grid/grid_tools.h>
+#include <deal.II/base/convergence_table.h>
 
 #include <fstream>
 #include <iostream>
@@ -71,7 +72,7 @@ private:
     void assemble_system_matrix();
     void assemble_system_rhs(const bool include_hessian_det);
     void compute_hessian();
-    void compute_pressure_error();
+    double compute_pressure_error();
     void solve();
     void output_results() const;
 
@@ -178,8 +179,8 @@ double RightHandSide<dim>::value(const Point<dim> &p,
     double dxy =   std::pow(numbers::PI, 2) * std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
     double dyy = dxx;
 
-    double laplacian = 0.1 * (dxx + dyy);
-    double hessian_det = std::pow(0.1, 2) * (dxx * dyy - dxy * dxy);
+    double laplacian = 0.01 * (dxx + dyy);
+    double hessian_det = std::pow(0.01, 2) * (dxx * dyy - dxy * dxy);
 
     return 1.0 + laplacian + hessian_det;
 }
@@ -373,38 +374,41 @@ double Sin_2_pi_x_Sin_2_pi_y<dim>::hessian_det(const Point<dim> &p) {
 }
 
 template <int dim>
-class X_2_Y_2 : public Function<dim>
+class Normal_Dist : public Function<dim>
 {
 public:
-    X_2_Y_2()
+    Normal_Dist()
             : Function<dim>(2)
     {}
 
     virtual double value(const Point<dim> & p,
                          const unsigned int component) const override;
-    virtual SymmetricTensor<dim, dim> hessian(const Point<dim> & p,
-                                              const unsigned int component) const override;
 };
 
-
-
 template <int dim>
-double X_2_Y_2<dim>::value(const Point<dim> &p,
-                                     const unsigned int /*component*/) const
+double Normal_Dist<dim>::value(const Point<dim> &p,
+                               const unsigned int /*component*/) const
 {
-    return p[0] * p[0] * p[1] * p[1];
+    return 0.001 * std::exp(-0.5 * (std::pow(p[0], 2) + std::pow(p[1], 2))) / (2. * numbers::PI);
 }
 
 template <int dim>
-SymmetricTensor<dim, dim> X_2_Y_2<dim>::hessian(const Point<dim> &p,
-                                                          const unsigned int /*component*/) const
+class Uniform_Dist : public Function<dim>
 {
-    SymmetricTensor<dim, dim> return_value;
-    return_value[0][0] = 2*p[1]*p[1];
-    return_value[0][1] = 4*p[0]*p[1];
-    return_value[1][0] = 4*p[0]*p[1];
-    return_value[1][1] = 2*p[0]*p[0];
-    return return_value;
+public:
+    Uniform_Dist()
+            : Function<dim>(2)
+    {}
+
+    virtual double value(const Point<dim> & p,
+                         const unsigned int component) const override;
+};
+
+template <int dim>
+double Uniform_Dist<dim>::value(const Point<dim> &p,
+                               const unsigned int /*component*/) const
+{
+    return 0.25;
 }
 
 
@@ -431,7 +435,7 @@ WGOptimalTransport<dim>::WGOptimalTransport(const unsigned int degree)
 template <int dim>
 void WGOptimalTransport<dim>::make_grid(unsigned int n_refinements)
 {
-    GridGenerator::hyper_cube(triangulation, 0, 1);
+    GridGenerator::hyper_cube(triangulation, -1, 1);
     triangulation.refine_global(n_refinements);
 
     std::cout << "   Number of active cells: " << triangulation.n_active_cells()
@@ -803,7 +807,8 @@ void WGOptimalTransport<dim>::assemble_system_rhs(const bool include_hessian_det
     Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
     Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
     Sin_2_pi_x_Sin_2_pi_y<dim> sin_2_pi_x_sin_2_pi_y;
-    X_2_Y_2<dim> x_2_y_2;
+    Normal_Dist<dim> normal_dist;
+    Uniform_Dist<dim> uniform_dist;
 
     typename DoFHandler<dim>::active_cell_iterator
             cell = dof_handler.begin_active(),
@@ -817,7 +822,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(const bool include_hessian_det
     {
         fe_values.reinit(cell);
 
-        right_hand_side.value_list(fe_values.get_quadrature_points(),
+        uniform_dist.value_list(fe_values.get_quadrature_points(),
                                    right_hand_side_values);
 
         if (!include_hessian_det) {
@@ -877,7 +882,7 @@ void WGOptimalTransport<dim>::assemble_system_rhs(const bool include_hessian_det
 template <int dim>
 void WGOptimalTransport<dim>::solve()
 {
-    SolverControl            solver_control(1000, 1e-8 * system_rhs.l2_norm());
+    SolverControl            solver_control(4000, 1e-8 * system_rhs.l2_norm());
     SolverCG<Vector<double>> solver(solver_control);
     solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
     constraints.distribute(solution);
@@ -1014,7 +1019,6 @@ void WGOptimalTransport<dim>::compute_hessian()
     Cos_pi_x_Cos_pi_y<dim> cos_pi_x_cos_pi_y;
     Sin_pi_x_Sin_pi_y<dim> sin_pi_x_sin_pi_y;
     Sin_2_pi_x_Sin_2_pi_y<dim> sin_2_pi_x_sin_2_pi_y;
-    X_2_Y_2<dim> x_2_y_2;
 
     std::vector<Point<3>> errors;
 
@@ -1167,7 +1171,7 @@ void WGOptimalTransport<dim>::compute_hessian()
 
 
 template <int dim>
-void WGOptimalTransport<dim>::compute_pressure_error()
+double WGOptimalTransport<dim>::compute_pressure_error()
 {
     Vector<float> difference_per_cell(triangulation.n_active_cells());
     const ComponentSelectFunction<dim> select_interior_pressure(0, 2);
@@ -1180,6 +1184,7 @@ void WGOptimalTransport<dim>::compute_pressure_error()
                                       &select_interior_pressure);
     const double L2_error = difference_per_cell.l2_norm();
     std::cout << "L2_error_pressure " << L2_error << std::endl;
+    return L2_error;
 }
 
 // @sect4{WGOptimalTransport::run}
@@ -1189,17 +1194,50 @@ void WGOptimalTransport<dim>::compute_pressure_error()
 template <int dim>
 void WGOptimalTransport<dim>::run()
 {
-    make_grid(2);
+    ConvergenceTable c_table;
+
+    const unsigned int refs = 5;
+    make_grid(refs);
     setup_system();
-    assemble_system_matrix();
+    std::ifstream fin("WG_Q2Q2RT2_refs_" + std::to_string(refs) + ".txt");
+    system_matrix.block_read(fin);
     solution = 0;
 
-    for (unsigned int i = 0; i < 10; ++i) {
+    const int max_iters = 20;
+    for (unsigned int j = 0; j < max_iters; ++j) {
         compute_hessian();
         system_rhs = 0;
         assemble_system_rhs(1);
+        auto old_solution = solution;
         solve();
-        compute_pressure_error();
+        old_solution.add(-1, solution);
+        c_table.add_value("j", j);
+        c_table.add_value("norm", old_solution.l2_norm());
+        std::cout << old_solution.l2_norm() << std::endl;
     }
+
+    c_table.evaluate_convergence_rates("norm", "j", dealii::ConvergenceTable::reduction_rate);
+    std::ofstream fout("c_table.txt");
+    c_table.write_text(fout);
+//    ConvergenceTable c_table;
+//
+//    for (unsigned int i = 1; i < 6; ++i) {
+//        triangulation.clear();
+//        make_grid(i);
+//        setup_system();
+//        std::ifstream fin("WG_Q2Q2RT2_refs_" + std::to_string(i) + ".txt");
+//        system_matrix.block_read(fin);
+//        solution = 0;
+//
+//        const int max_iters = 10;
+//        for (unsigned int j = 0; j < max_iters; ++j) {
+//            compute_hessian();
+//            system_rhs = 0;
+//            assemble_system_rhs(1);
+//            solve();
+//        }
+//        c_table.add_value("h", std::pow(2, i));
+//        c_table.add_value("err", compute_pressure_error());
+//    }
 
 }
