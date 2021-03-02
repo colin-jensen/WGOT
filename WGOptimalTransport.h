@@ -168,18 +168,18 @@ template <int dim>
 double RightHandSide<dim>::value(const Point<dim> &p,
                                  const unsigned int /*component*/) const
 {
-//    double dxx = 2.0 * std::pow(numbers::PI, 2) * std::cos(2 * numbers::PI * p[0]) *
-//                         std::pow(std::sin(numbers::PI * p[1]), 2);
-//    double dxy = std::pow(numbers::PI, 2) * std::sin(2 * numbers::PI * p[0]) *
-//                         std::sin(2 * numbers::PI * p[1]);
-//    double dyy = 2.0 * std::pow(numbers::PI, 2) * std::cos(2 * numbers::PI * p[1]) *
-//                         std::pow(std::sin(numbers::PI * p[0]), 2);
+    double dxx = 2.0 * std::pow(numbers::PI, 2) * std::cos(2 * numbers::PI * p[0]) *
+                         std::pow(std::sin(numbers::PI * p[1]), 2);
+    double dxy = std::pow(numbers::PI, 2) * std::sin(2 * numbers::PI * p[0]) *
+                         std::sin(2 * numbers::PI * p[1]);
+    double dyy = 2.0 * std::pow(numbers::PI, 2) * std::cos(2 * numbers::PI * p[1]) *
+                         std::pow(std::sin(numbers::PI * p[0]), 2);
 
-    double dxx = - std::pow(numbers::PI, 2) * std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
-    double dxy =   std::pow(numbers::PI, 2) * std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
-    double dyy = dxx;
+//    double dxx = - std::pow(numbers::PI, 2) * std::cos(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+//    double dxy =   std::pow(numbers::PI, 2) * std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
+//    double dyy = dxx;
 
-    double laplacian = 0.01 * (dxx + dyy);
+    double laplacian = 0.05 * (dxx + dyy);
     double hessian_det = std::pow(0.01, 2) * (dxx * dyy - dxy * dxy);
 
     return 1.0 + laplacian + hessian_det;
@@ -335,7 +335,7 @@ double Sin_2_pi_x_Sin_2_pi_y<dim>::value(const Point<dim> &p,
 {
     double val = std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]) *
                  std::sin(numbers::PI * p[0]) * std::sin(numbers::PI * p[1]);
-    return 0.1 * val;
+    return 0.05 * val;
 }
 
 template <int dim>
@@ -1196,9 +1196,15 @@ void WGOptimalTransport<dim>::run()
 {
     ConvergenceTable c_table;
 
-    const unsigned int refs = 5;
+    const unsigned int refs = 6;
     make_grid(refs);
     setup_system();
+    assemble_system_matrix();
+    std::ofstream fout2("WG_Q2Q2RT2_refs_6.txt");
+    system_matrix.block_write(fout2);
+    return;
+
+
     std::ifstream fin("WG_Q2Q2RT2_refs_" + std::to_string(refs) + ".txt");
     system_matrix.block_read(fin);
     solution = 0;
